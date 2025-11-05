@@ -282,5 +282,10 @@ def _setup_fts(connection) -> None:
     connection.exec_driver_sql(
         "CREATE INDEX IF NOT EXISTS idx_message_recipients_agent ON message_recipients(agent_id)"
     )
+    # Case-insensitive unique index on agent names for global uniqueness
+    # This prevents race conditions by enforcing uniqueness at the database level
+    connection.exec_driver_sql(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_agents_name_ci ON agents(lower(name))"
+    )
 
 

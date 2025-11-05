@@ -24,7 +24,7 @@ from fastmcp import Context, FastMCP
 from git import Repo
 from git.exc import InvalidGitRepositoryError, NoSuchPathError
 from sqlalchemy import asc, desc, func, or_, select, text, update
-from sqlalchemy.exc import NoResultFound
+from sqlalchemy.exc import IntegrityError, NoResultFound
 from sqlalchemy.orm import aliased
 
 from . import rich_logger
@@ -1113,8 +1113,15 @@ async def _create_agent_record(
             task_description=task_description,
         )
         session.add(agent)
-        await session.commit()
-        await session.refresh(agent)
+        try:
+            await session.commit()
+            await session.refresh(agent)
+        except IntegrityError as exc:
+            await session.rollback()
+            raise ValueError(
+                f"Agent name '{name}' is already in use globally. "
+                "Please choose a different name or let the system auto-generate one."
+            ) from exc
         return agent
 
 
@@ -1166,8 +1173,15 @@ async def _get_or_create_agent(
             agent.task_description = task_description
             agent.last_active_ts = datetime.now(timezone.utc)
             session.add(agent)
-            await session.commit()
-            await session.refresh(agent)
+            try:
+                await session.commit()
+                await session.refresh(agent)
+            except IntegrityError as exc:
+                await session.rollback()
+                raise ValueError(
+                    f"Agent name '{desired_name}' is already in use globally. "
+                    "Please choose a different name or let the system auto-generate one."
+                ) from exc
         else:
             agent = Agent(
                 project_id=project.id,
@@ -1177,8 +1191,17 @@ async def _get_or_create_agent(
                 task_description=task_description,
             )
             session.add(agent)
-            await session.commit()
-            await session.refresh(agent)
+            try:
+                await session.commit()
+                await session.refresh(agent)
+            except IntegrityError as exc:
+                await session.rollback()
+                # Race condition: name was taken between our check and commit
+                # In coerce mode, we could retry with a new name, but for now raise a clear error
+                raise ValueError(
+                    f"Agent name '{desired_name}' is already in use globally (race condition detected). "
+                    "Please try again - the system will generate a unique name."
+                ) from exc
     archive = await ensure_archive(settings, project.slug)
     async with _archive_write_lock(archive):
         await write_agent_profile(archive, _agent_to_dict(agent))

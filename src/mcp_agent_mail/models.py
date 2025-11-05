@@ -21,7 +21,8 @@ class Project(SQLModel, table=True):
 
 class Agent(SQLModel, table=True):
     __tablename__ = "agents"
-    __table_args__ = (UniqueConstraint("project_id", "name", name="uq_agent_project_name"),)
+    # Note: Global case-insensitive uniqueness is enforced via functional index in db.py (_setup_fts)
+    # This allows proper race condition handling via IntegrityError
 
     id: Optional[int] = Field(default=None, primary_key=True)
     project_id: int = Field(foreign_key="projects.id", index=True)
