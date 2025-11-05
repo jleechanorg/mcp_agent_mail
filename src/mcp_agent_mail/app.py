@@ -1082,10 +1082,20 @@ async def _generate_unique_agent_name(
             if await available(sanitized):
                 return sanitized
             if mode == "strict":
-                raise ValueError(f"Agent name '{sanitized}' is already in use.")
+                raise ToolExecutionError(
+                    "NAME_TAKEN",
+                    f"Agent name '{sanitized}' is already in use globally.",
+                    recoverable=True,
+                    data={"name": sanitized},
+                )
         else:
             if mode == "strict":
-                raise ValueError("Name hint must contain alphanumeric characters.")
+                raise ToolExecutionError(
+                    "INVALID_ARGUMENT",
+                    "Name hint must contain alphanumeric characters.",
+                    recoverable=True,
+                    data={"name_hint": name_hint},
+                )
 
     for _ in range(1024):
         candidate = sanitize_agent_name(generate_agent_name())
@@ -1144,7 +1154,12 @@ async def _get_or_create_agent(
         sanitized = sanitize_agent_name(name)
         if not sanitized:
             if mode == "strict":
-                raise ValueError("Agent name must contain alphanumeric characters.")
+                raise ToolExecutionError(
+                    "INVALID_ARGUMENT",
+                    "Agent name must contain alphanumeric characters.",
+                    recoverable=True,
+                    data={"name": name},
+                )
             desired_name = await _generate_unique_agent_name(project, settings, None)
         else:
             # Check if the user-provided name is globally unique
@@ -1153,7 +1168,12 @@ async def _get_or_create_agent(
                 if not await _agent_name_exists(project, sanitized):
                     # Exists in another project, not this one - need unique name
                     if mode == "strict":
-                        raise ValueError(f"Agent name '{sanitized}' already exists in another project.")
+                        raise ToolExecutionError(
+                            "NAME_TAKEN",
+                            f"Agent name '{sanitized}' is already in use globally.",
+                            recoverable=True,
+                            data={"name": sanitized, "conflict": "other_project"},
+                        )
                     # In coerce mode, generate a unique name
                     desired_name = await _generate_unique_agent_name(project, settings, sanitized)
                 else:
