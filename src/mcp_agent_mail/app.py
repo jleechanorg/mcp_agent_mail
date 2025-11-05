@@ -1118,9 +1118,11 @@ async def _create_agent_record(
             await session.refresh(agent)
         except IntegrityError as exc:
             await session.rollback()
-            raise ValueError(
-                f"Agent name '{name}' is already in use globally. "
-                "Please choose a different name or let the system auto-generate one."
+            raise ToolExecutionError(
+                "NAME_TAKEN",
+                f"Agent name '{name}' is already in use globally.",
+                recoverable=True,
+                data={"name": name},
             ) from exc
         return agent
 
@@ -1178,9 +1180,11 @@ async def _get_or_create_agent(
                 await session.refresh(agent)
             except IntegrityError as exc:
                 await session.rollback()
-                raise ValueError(
-                    f"Agent name '{desired_name}' is already in use globally. "
-                    "Please choose a different name or let the system auto-generate one."
+                raise ToolExecutionError(
+                    "NAME_TAKEN",
+                    f"Agent name '{desired_name}' is already in use globally.",
+                    recoverable=True,
+                    data={"name": desired_name},
                 ) from exc
         else:
             agent = Agent(
@@ -1197,10 +1201,11 @@ async def _get_or_create_agent(
             except IntegrityError as exc:
                 await session.rollback()
                 # Race condition: name was taken between our check and commit
-                # In coerce mode, we could retry with a new name, but for now raise a clear error
-                raise ValueError(
-                    f"Agent name '{desired_name}' is already in use globally (race condition detected). "
-                    "Please try again - the system will generate a unique name."
+                raise ToolExecutionError(
+                    "NAME_TAKEN",
+                    f"Agent name '{desired_name}' is already in use globally (race condition detected). Please try again.",
+                    recoverable=True,
+                    data={"name": desired_name, "race_condition": True},
                 ) from exc
     archive = await ensure_archive(settings, project.slug)
     async with _archive_write_lock(archive):
