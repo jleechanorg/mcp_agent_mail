@@ -204,9 +204,11 @@ See if anyone has sent you messages:
 - Adds "Re:" prefix to subject if not already present
 - Inherits `importance` and `ack_required` from original message
 
-### Workflow 3: Requesting Contact Approval
+### Workflow 3: Requesting Contact Approval (OPTIONAL - NOT REQUIRED)
 
-Before messaging an agent for the first time, you may want to request approval:
+**NOTE: Contact approval is no longer required. Agents can send messages directly using `send_message` without requesting contact first.**
+
+This workflow is maintained for backward compatibility. If you want to use it for explicit contact tracking:
 
 ```json
 {
@@ -220,7 +222,7 @@ Before messaging an agent for the first time, you may want to request approval:
 }
 ```
 
-**Note:** Contact policies are configurable. By default, agents can message each other without approval.
+**Note:** Contact policies are no longer enforced by default. All agents can message each other directly.
 
 ### Workflow 3.5: Discovering Related Projects
 
@@ -288,44 +290,37 @@ Instead, we split the problem:
 └────────────────┬────────────────────────────────────────────┘
                  ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 3. Agent requests contact (explicit permission request)     │
-│    request_contact(from_agent, to_agent, to_project)        │
-└────────────────┬────────────────────────────────────────────┘
-                 ↓
-┌─────────────────────────────────────────────────────────────┐
-│ 4. You approve contact (authorize messaging)                │
-│    respond_contact(accept=true)                             │
-└────────────────┬────────────────────────────────────────────┘
-                 ↓
-┌─────────────────────────────────────────────────────────────┐
-│ 5. Messages flow (agents can now communicate)               │
-│    AgentLink established → Messages delivered               │
+│ 3. Messages flow (agents can communicate directly)          │
+│    send_message with cross-project addressing               │
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**NOTE:** Contact approval is no longer required. Steps 3-4 in the old workflow (request_contact/respond_contact) are now optional. Agents can message each other directly after project discovery.
+
 **Think of it like your phone's contact list**:
 - Discovery = "People you may know" suggestions
-- Authorization = Actually adding them to your contacts
+- UI confirmation = Visual organization (not authorization)
 
 #### Your Next Steps
 
 When you see a sibling suggestion you agree with:
 
-1. **Confirm the link** in the UI (updates navigation badges)
-2. **Run the contact workflow** so agents can actually communicate:
+1. **Confirm the link** in the UI (updates navigation badges for better organization)
+2. **Agents can message directly** using cross-project addressing in `send_message`:
    ```json
    {
-     "tool": "request_contact",
+     "tool": "send_message",
      "arguments": {
        "project_key": "/data/projects/my-app-frontend",
-       "from_agent": "FrontendDev",
-       "to_agent": "BackendDev",
-       "to_project": "/data/projects/my-app-backend",
-       "reason": "Need to coordinate API changes"
+       "sender_name": "FrontendDev",
+       "to": ["project:my-app-backend#BackendDev"],
+       "subject": "Need to coordinate API changes",
+       "body_md": "Let's discuss the upcoming API updates..."
      }
    }
    ```
-3. **Approve the request** to establish the messaging link
+
+**NOTE:** No contact approval required. The `to` field can include cross-project addresses like `project:<slug>#<AgentName>`.
 
 ### Workflow 4: Reserving Files Before Editing
 
@@ -563,9 +558,11 @@ Align with an existing discussion thread:
 3. Fetches recent inbox
 4. Returns context to jump into the discussion
 
-### Contact Policies
+### Contact Policies (OPTIONAL - NOT ENFORCED)
 
-Configure how other agents can reach you:
+**NOTE: Contact policies are no longer enforced by default. All agents can message each other directly without approval.**
+
+This feature is maintained for backward compatibility. To enable policy enforcement, set `CONTACT_ENFORCEMENT_ENABLED=true` in your configuration.
 
 ```json
 {
@@ -578,7 +575,7 @@ Configure how other agents can reach you:
 }
 ```
 
-**Policies:**
+**Policies (only effective if enforcement is enabled):**
 - `open` - Anyone can message you without approval
 - `auto` - Auto-approve contacts with reservation overlap or same thread
 - `contacts_only` - Only approved contacts can message you
@@ -684,7 +681,7 @@ If you encounter issues:
 2. **Experiment with messaging** - Send messages between agents
 3. **Practice reserving files** - Use file reservations to signal editing intent
 4. **Explore thread summaries** - Use `summarize_thread()` for long discussions
-5. **Set up contact policies** - Configure how agents can reach you
+5. **Set up contact policies (optional)** - Configure how agents can reach you (not enforced by default)
 
 For more details, see:
 - [ROOT_CAUSE_ANALYSIS.md](./ROOT_CAUSE_ANALYSIS.md) - Understanding the system architecture
