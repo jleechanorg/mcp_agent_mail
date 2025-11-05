@@ -36,26 +36,30 @@ Advanced features for specialized workflows:
 
 ## Current Implementation
 
-### What's Included (v1 - Foundation)
+### What's Included (v2 - Meta-Tools)
 
 ✅ **Tool Categorization**: Constants define core vs extended tools
 ✅ **Metadata**: Each extended tool has category and description
-✅ **Registry Placeholder**: `_EXTENDED_TOOL_REGISTRY` prepared for future use
-✅ **Zero Breaking Changes**: All 27 tools remain functional
+✅ **Tool Registry**: `_EXTENDED_TOOL_REGISTRY` populated with all extended tools
+✅ **Meta-Tools**: `list_extended_tools` and `call_extended_tool` implemented
+✅ **Environment Variable**: `MCP_TOOLS_MODE` support added (behavior in Phase 3)
+✅ **Integration Tests**: Comprehensive test suite for lazy loading functionality
+✅ **Zero Breaking Changes**: All 29 tools remain functional (27 original + 2 meta)
 
 ### What's Not Yet Implemented
 
-⚠️ **Meta-Tools**: `list_extended_tools` and `call_extended_tool` (future)
-⚠️ **Environment Variable**: `MCP_TOOLS_MODE=core` support (future)
-⚠️ **Conditional Registration**: Runtime tool filtering (future)
-⚠️ **Context Savings**: Requires meta-tools + conditional registration
+⚠️ **Conditional Registration**: Runtime tool filtering based on `MCP_TOOLS_MODE` (Phase 3)
+⚠️ **Actual Context Savings**: Requires conditional registration implementation
+⚠️ **FastMCP Enhancement**: May need custom filtering or upstream contribution
 
 ## Context Reduction Potential
 
 | Mode | Tools Exposed | Approx Tokens | Savings |
 |------|--------------|---------------|---------|
-| Extended (current) | 27 tools | ~25k | - |
-| Core (future) | 8 core + 2 meta | ~10k | **60%** |
+| Extended (current) | 29 tools (27 + 2 meta) | ~25k | - |
+| Core (Phase 3) | 8 core + 2 meta = 10 tools | ~10k | **60%** |
+
+**Note**: Meta-tools are available now, but conditional registration (Phase 3) is required to achieve actual context savings.
 
 ## Roadmap
 
@@ -64,16 +68,19 @@ Advanced features for specialized workflows:
 - ✅ Metadata for discovery
 - ✅ Registry placeholder
 
-### Phase 2: Meta-Tools (Next)
-- [ ] Implement `list_extended_tools`
-- [ ] Implement `call_extended_tool`
-- [ ] Add environment variable support
-- [ ] Integration tests
+### Phase 2: Meta-Tools (Complete ✅)
+- ✅ Implement `list_extended_tools`
+- ✅ Implement `call_extended_tool`
+- ✅ Add environment variable support (`MCP_TOOLS_MODE`)
+- ✅ Integration tests
+- ✅ Populate `_EXTENDED_TOOL_REGISTRY`
 
-### Phase 3: Runtime Filtering (Future)
-- [ ] Conditional tool registration
-- [ ] FastMCP enhancement or workaround
+### Phase 3: Runtime Filtering (Next)
+- [ ] Research FastMCP tool registration capabilities
+- [ ] Implement conditional tool registration based on `MCP_TOOLS_MODE`
+- [ ] FastMCP enhancement or workaround implementation
 - [ ] Full context savings validation
+- [ ] Performance benchmarks for both modes
 
 ## Design Decisions
 
@@ -92,6 +99,79 @@ Advanced features for specialized workflows:
 - Requires FastMCP runtime filtering or decorator refactoring
 - Meta-tools provide value independently
 - Foundation enables experimentation
+
+## Usage
+
+### Listing Extended Tools
+
+Use the `list_extended_tools` tool to discover available extended tools:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "tools/call",
+  "params": {
+    "name": "list_extended_tools",
+    "arguments": {}
+  }
+}
+```
+
+Returns:
+```json
+{
+  "total": 19,
+  "by_category": {
+    "messaging": ["acknowledge_message"],
+    "search": ["search_messages", "summarize_thread", "summarize_threads"],
+    "identity": ["create_agent_identity"],
+    "contact": ["request_contact", "respond_contact", "list_contacts", "set_contact_policy"],
+    "file_reservations": ["file_reservation_paths", "release_file_reservations", "force_release_file_reservation", "renew_file_reservations"],
+    "workflow_macros": ["macro_start_session", "macro_prepare_thread", "macro_file_reservation_cycle", "macro_contact_handshake"],
+    "infrastructure": ["install_precommit_guard", "uninstall_precommit_guard"]
+  },
+  "tools": [
+    {"name": "acknowledge_message", "category": "messaging", "description": "Acknowledge a message (sets both read_ts and ack_ts)"},
+    ...
+  ]
+}
+```
+
+### Calling Extended Tools
+
+Use the `call_extended_tool` tool to invoke extended tools dynamically:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "tools/call",
+  "params": {
+    "name": "call_extended_tool",
+    "arguments": {
+      "tool_name": "acknowledge_message",
+      "arguments": {
+        "project_key": "/data/projects/backend",
+        "agent_name": "BackendDev",
+        "message_id": 42
+      }
+    }
+  }
+}
+```
+
+### Environment Variable
+
+Set `MCP_TOOLS_MODE` to control tool exposure (Phase 3 implementation required):
+
+```bash
+# Default: all tools exposed
+export MCP_TOOLS_MODE=extended
+
+# Future: only core tools + meta-tools (Phase 3)
+export MCP_TOOLS_MODE=core
+```
 
 ## Related Work
 

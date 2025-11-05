@@ -2242,6 +2242,156 @@ def build_mcp_server() -> FastMCP:
             "database_url": settings.database.url,
         }
 
+    @mcp.tool(name="list_extended_tools", description="List all extended tools with metadata for discovery.")
+    @_instrument_tool("list_extended_tools", cluster=CLUSTER_SETUP, capabilities={"discovery"}, complexity="low")
+    async def list_extended_tools(ctx: Context) -> dict[str, Any]:
+        """
+        List all extended tools with metadata.
+
+        When to use
+        -----------
+        - When you want to discover available extended tools beyond core tools
+        - Before calling `call_extended_tool` to see available tool names
+        - To understand tool categories and capabilities
+
+        What it returns
+        ---------------
+        - Total count of extended tools
+        - Tools grouped by category
+        - Full list with name, category, and description for each tool
+
+        Returns
+        -------
+        dict
+            {
+              "total": int,
+              "by_category": dict[str, list[str]],
+              "tools": list[dict] with name, category, description
+            }
+
+        Examples
+        --------
+        JSON-RPC:
+        ```json
+        {"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"list_extended_tools","arguments":{}}}
+        ```
+
+        Typical agent usage:
+        - Call `list_extended_tools` to see what's available
+        - Use `call_extended_tool` to invoke specific extended tools
+        """
+        await ctx.info("Listing extended tools")
+
+        by_category: dict[str, list[str]] = {}
+        tools_list = []
+
+        for tool_name in sorted(EXTENDED_TOOLS):
+            metadata = EXTENDED_TOOL_METADATA.get(tool_name, {})
+            category = metadata.get("category", "uncategorized")
+            description = metadata.get("description", "")
+
+            by_category.setdefault(category, []).append(tool_name)
+            tools_list.append({
+                "name": tool_name,
+                "category": category,
+                "description": description
+            })
+
+        return {
+            "total": len(EXTENDED_TOOLS),
+            "by_category": by_category,
+            "tools": tools_list
+        }
+
+    @mcp.tool(name="call_extended_tool", description="Dynamically invoke an extended tool by name.")
+    @_instrument_tool("call_extended_tool", cluster=CLUSTER_SETUP, capabilities={"proxy"}, complexity="medium")
+    async def call_extended_tool(ctx: Context, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """
+        Dynamically invoke an extended tool by name.
+
+        When to use
+        -----------
+        - When you need to call an extended tool that's not in core tools
+        - To reduce context usage by not having all extended tools visible
+        - When working with category-specific features (file_reservations, contact management, etc.)
+
+        How it works
+        ------------
+        - Validates that `tool_name` exists in EXTENDED_TOOLS
+        - Looks up the tool function in the registry
+        - Invokes the tool with provided arguments
+        - Returns the tool's result
+
+        Parameters
+        ----------
+        tool_name : str
+            Name of extended tool (e.g., "file_reservation_paths", "acknowledge_message")
+        arguments : dict
+            Tool-specific arguments (e.g., {"project_key": "...", "agent_name": "..."})
+
+        Returns
+        -------
+        dict
+            Result from invoked tool (tool-specific format)
+
+        Raises
+        ------
+        ValueError
+            If tool_name not in EXTENDED_TOOLS or invalid arguments
+        RuntimeError
+            If tool not registered (internal error)
+
+        Examples
+        --------
+        JSON-RPC (acknowledge a message):
+        ```json
+        {
+          "jsonrpc":"2.0",
+          "id":"1",
+          "method":"tools/call",
+          "params":{
+            "name":"call_extended_tool",
+            "arguments":{
+              "tool_name":"acknowledge_message",
+              "arguments":{
+                "project_key":"/data/projects/backend",
+                "agent_name":"BackendDev",
+                "message_id":42
+              }
+            }
+          }
+        }
+        ```
+
+        Typical agent usage:
+        - Call `list_extended_tools` first to discover available tools
+        - Use `call_extended_tool` to invoke the specific tool you need
+        - Provide tool-specific arguments in the `arguments` parameter
+        """
+        if tool_name not in EXTENDED_TOOLS:
+            raise ValueError(
+                f"Unknown extended tool: {tool_name}. "
+                f"Use list_extended_tools to see available options."
+            )
+
+        tool_func = _EXTENDED_TOOL_REGISTRY.get(tool_name)
+        if not tool_func:
+            raise RuntimeError(
+                f"Extended tool {tool_name} is not registered. "
+                f"This is an internal server error."
+            )
+
+        await ctx.info(f"Invoking extended tool: {tool_name}")
+
+        try:
+            result = await tool_func(ctx, **arguments)
+            return result
+        except TypeError as e:
+            # Invalid arguments
+            raise ValueError(
+                f"Invalid arguments for {tool_name}: {str(e)}"
+            ) from e
+
     @mcp.tool(name="ensure_project")
     @_instrument_tool("ensure_project", cluster=CLUSTER_SETUP, capabilities={"infrastructure", "storage"}, complexity="low", project_arg="human_key")
     async def ensure_project(ctx: Context, human_key: str) -> dict[str, Any]:
@@ -6910,5 +7060,28 @@ def build_mcp_server() -> FastMCP:
         return {"project": project_obj.human_key, "agent": agent_obj.name, "count": len(enriched), "messages": enriched}
 
     # No explicit output-schema transform; the tool returns ToolResult with {"result": ...}
+
+    # Populate extended tool registry for dynamic invocation via call_extended_tool
+    _EXTENDED_TOOL_REGISTRY.update({
+        "create_agent_identity": create_agent_identity,
+        "acknowledge_message": acknowledge_message,
+        "search_messages": search_messages,
+        "request_contact": request_contact,
+        "respond_contact": respond_contact,
+        "list_contacts": list_contacts,
+        "set_contact_policy": set_contact_policy,
+        "file_reservation_paths": file_reservation_paths,
+        "release_file_reservations": release_file_reservations,
+        "force_release_file_reservation": force_release_file_reservation,
+        "renew_file_reservations": renew_file_reservations,
+        "summarize_thread": summarize_thread,
+        "summarize_threads": summarize_threads,
+        "macro_start_session": macro_start_session,
+        "macro_prepare_thread": macro_prepare_thread,
+        "macro_file_reservation_cycle": macro_file_reservation_cycle,
+        "macro_contact_handshake": macro_contact_handshake,
+        "install_precommit_guard": install_precommit_guard,
+        "uninstall_precommit_guard": uninstall_precommit_guard,
+    })
 
     return mcp
