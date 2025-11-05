@@ -21,8 +21,14 @@ class Project(SQLModel, table=True):
 
 class Agent(SQLModel, table=True):
     __tablename__ = "agents"
-    # Note: Global case-insensitive uniqueness is enforced via functional index in db.py (_setup_fts)
-    # This allows proper race condition handling via IntegrityError
+    # BREAKING CHANGE: Agent names are now globally unique across all projects (case-insensitive)
+    #
+    # Previous behavior: Names were unique per-project; "Alice" could exist in multiple projects
+    # New behavior: "Alice" can only exist once across ALL projects; "alice" and "Alice" are considered the same
+    #
+    # Enforcement: Global case-insensitive uniqueness via functional index uq_agents_name_ci in db.py (_setup_fts)
+    # Migration: Existing duplicate names are auto-renamed with numeric suffixes (Alice → Alice2, Alice3, etc.)
+    # Race handling: IntegrityError is caught and converted to ValueError with clear user-facing message
 
     id: Optional[int] = Field(default=None, primary_key=True)
     project_id: int = Field(foreign_key="projects.id", index=True)

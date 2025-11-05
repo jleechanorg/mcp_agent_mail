@@ -1067,11 +1067,11 @@ async def _generate_unique_agent_name(
     settings: Settings,
     name_hint: Optional[str] = None,
 ) -> str:
-    archive = await ensure_archive(settings, project.slug)
-
     async def available(candidate: str) -> bool:
         # Check globally across all projects for uniqueness
-        return not await _agent_name_exists_globally(candidate) and not (archive.root / "agents" / candidate).exists()
+        # Database is the source of truth - filesystem check removed
+        # (each project has separate archive directories, so filesystem check was project-specific)
+        return not await _agent_name_exists_globally(candidate)
 
     mode = getattr(settings, "agent_name_enforcement_mode", "coerce").lower()
     if name_hint:
