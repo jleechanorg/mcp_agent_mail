@@ -1446,19 +1446,19 @@ Common variables you may set:
 
 The server supports two tool exposure modes to manage token usage:
 
-**Core Mode (Default)**
+#### Core Mode (Default)
 - Exposes 10 essential tools: `health_check`, `ensure_project`, `register_agent`, `whois`, `send_message`, `reply_message`, `fetch_inbox`, `mark_message_read`, `list_extended_tools`, `call_extended_tool`
 - ~10k tokens initial context
 - Extended tools (19 additional tools) remain accessible via the `call_extended_tool` meta-tool
 - Best for most use cases where you want to minimize initial context usage
 
-**Extended Mode**
+#### Extended Mode
 - Exposes all 29 tools directly to the MCP client
 - ~25k tokens initial context
 - No need to use meta-tools; all tools are available directly
 - Best for workflows that heavily use many advanced features
 
-**Switching modes:**
+#### Switching modes
 
 ```bash
 # Set to extended mode (expose all tools)
@@ -1472,7 +1472,7 @@ echo "MCP_TOOLS_MODE=core" >> .env
 scripts/run_server_with_token.sh
 ```
 
-**Using extended tools in core mode:**
+#### Using extended tools in core mode
 
 ```python
 # Instead of calling the tool directly:

@@ -7026,13 +7026,15 @@ def build_mcp_server() -> FastMCP:
     if settings.tools_mode == "core":
         # In core mode, hide extended tools from direct MCP exposure
         # They remain accessible via call_extended_tool meta-tool
+        # Note: Meta-tools (list_extended_tools, call_extended_tool) are intentionally
+        # NOT in CORE_TOOLS or EXTENDED_TOOLS - they're kept by not being in EXTENDED_TOOLS
         # Remove extended tools using FastMCP's remove_tool method
         for tool_name in EXTENDED_TOOLS:
             try:
                 mcp.remove_tool(tool_name)
-            except Exception:
-                # Tool might not exist, that's ok
-                pass
+            except (KeyError, AttributeError, ValueError) as e:
+                # Tool might not exist or already removed, that's ok
+                logger.debug(f"Could not remove tool {tool_name}: {e}")
 
         # Count remaining tools by checking what's in CORE_TOOLS + meta tools
         exposed_count = len(CORE_TOOLS) + 2  # +2 for list_extended_tools and call_extended_tool
