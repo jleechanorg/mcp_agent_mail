@@ -7021,4 +7021,26 @@ def build_mcp_server() -> FastMCP:
         "uninstall_precommit_guard": uninstall_precommit_guard,
     })
 
+
+    # Conditional tool exposure based on tools_mode setting
+    if settings.tools_mode == "core":
+        # In core mode, hide extended tools from direct MCP exposure
+        # They remain accessible via call_extended_tool meta-tool
+        # Remove extended tools using FastMCP's remove_tool method
+        for tool_name in EXTENDED_TOOLS:
+            try:
+                mcp.remove_tool(tool_name)
+            except Exception:
+                # Tool might not exist, that's ok
+                pass
+
+        # Count remaining tools by checking what's in CORE_TOOLS + meta tools
+        exposed_count = len(CORE_TOOLS) + 2  # +2 for list_extended_tools and call_extended_tool
+        hidden_count = len(EXTENDED_TOOLS)
+        logger.info(f"Core mode enabled: Exposed {exposed_count} tools (hidden {hidden_count} extended tools)")
+    else:
+        # Extended mode: all tools exposed
+        total_count = len(CORE_TOOLS) + len(EXTENDED_TOOLS) + 2  # +2 for meta tools
+        logger.info(f"Extended mode: All {total_count} tools exposed directly")
+
     return mcp

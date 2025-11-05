@@ -1442,6 +1442,54 @@ HTTP_PATH = decouple_config("HTTP_PATH", default="/mcp/")
 
 Common variables you may set:
 
+### Tool Exposure Modes (Lazy Loading)
+
+The server supports two tool exposure modes to manage token usage:
+
+**Core Mode (Default)**
+- Exposes 10 essential tools: `health_check`, `ensure_project`, `register_agent`, `whois`, `send_message`, `reply_message`, `fetch_inbox`, `mark_message_read`, `list_extended_tools`, `call_extended_tool`
+- ~10k tokens initial context
+- Extended tools (19 additional tools) remain accessible via the `call_extended_tool` meta-tool
+- Best for most use cases where you want to minimize initial context usage
+
+**Extended Mode**
+- Exposes all 29 tools directly to the MCP client
+- ~25k tokens initial context
+- No need to use meta-tools; all tools are available directly
+- Best for workflows that heavily use many advanced features
+
+**Switching modes:**
+
+```bash
+# Set to extended mode (expose all tools)
+echo "MCP_TOOLS_MODE=extended" >> .env
+
+# Set to core mode (lazy loading, default)
+echo "MCP_TOOLS_MODE=core" >> .env
+# Or simply remove the line (core is now the default)
+
+# Restart server for changes to take effect
+scripts/run_server_with_token.sh
+```
+
+**Using extended tools in core mode:**
+
+```python
+# Instead of calling the tool directly:
+await client.call_tool("acknowledge_message", {"project_key": "...", "agent_name": "...", "message_id": 123})
+
+# Use the meta-tool in core mode:
+await client.call_tool("call_extended_tool", {
+    "tool_name": "acknowledge_message",
+    "arguments": {"project_key": "...", "agent_name": "...", "message_id": 123}
+})
+
+# List all extended tools:
+result = await client.call_tool("list_extended_tools", {})
+# Returns: {"total": 19, "by_category": {...}, "tools": [{name, category, description}, ...]}
+```
+
+
 ### Configuration reference
 
 | Name | Default | Description |
@@ -1530,6 +1578,7 @@ Common variables you may set:
 | `QUOTA_INBOX_LIMIT_COUNT` | `0` | Max inbox messages per agent (0=unlimited) |
 | `RETENTION_IGNORE_PROJECT_PATTERNS` | `demo,test*,testproj*,testproject,backendproj*,frontendproj*` | CSV of project patterns to ignore in retention/quota reports |
 | `AGENT_NAME_ENFORCEMENT_MODE` | `coerce` | Agent naming policy: `strict` (reject invalid adjective+noun names), `coerce` (auto-generate if invalid), `always_auto` (always auto-generate) |
+| `MCP_TOOLS_MODE` | `core` | Tool exposure mode: `core` (10 essential tools + meta-tools for lazy loading ~10k tokens) or `extended` (all 29 tools exposed directly ~25k tokens). Core mode reduces initial context by exposing only essential coordination tools, with extended tools accessible via `call_extended_tool` meta-tool. |
 
 ## Development quick start
 
