@@ -53,7 +53,12 @@ async def test_call_extended_tool_valid(isolated_env):
     async with Client(mcp) as client:
         # First setup: create a project and agent for the test
         await client.call_tool("ensure_project", arguments={"human_key": "/tmp/test_project"})
-        await client.call_tool("register_agent", arguments={"project_key": "/tmp/test_project", "agent_name": "test_agent"})
+        await client.call_tool("register_agent", arguments={
+            "project_key": "/tmp/test_project",
+            "program": "test_program",
+            "model": "test_model",
+            "name": "test_agent"
+        })
 
         # Test calling an extended tool via the meta-tool
         # Use list_contacts as it's a simple read-only tool
