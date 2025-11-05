@@ -2282,7 +2282,7 @@ def build_mcp_server() -> FastMCP:
 
     @mcp.tool(name="call_extended_tool")
     @_instrument_tool("call_extended_tool", cluster=CLUSTER_SETUP, capabilities={"proxy"}, complexity="medium")
-    async def call_extended_tool(ctx: Context, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call_extended_tool(ctx: Context, tool_name: str, arguments: dict[str, Any]) -> Any:
         """
         Dynamically invoke an extended tool by name.
 

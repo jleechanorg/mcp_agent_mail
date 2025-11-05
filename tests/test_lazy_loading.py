@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from fastmcp import Client, Context
+from fastmcp import Client
 
 from mcp_agent_mail.app import (
     CORE_TOOLS,
@@ -115,7 +115,7 @@ async def test_call_extended_tool_invalid_arguments(isolated_env):
 def test_extended_tool_registry_populated():
     """Test all extended tools are in registry."""
     # Build the server to trigger registry population
-    mcp = build_mcp_server()
+    build_mcp_server()
 
     # Check registry has correct count
     assert len(_EXTENDED_TOOL_REGISTRY) == len(EXTENDED_TOOLS)
