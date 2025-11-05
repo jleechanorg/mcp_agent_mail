@@ -3508,6 +3508,7 @@ def build_mcp_server() -> FastMCP:
         local_cc: list[str] = []
         local_bcc: list[str] = []
         external: dict[int, dict[str, Any]] = {}
+        unknown_external: dict[str, list[str]] = defaultdict(list)
 
         async with get_session() as sx:
             existing = await sx.execute(select(Agent.name).where(Agent.project_id == project.id))
@@ -3518,17 +3519,38 @@ def build_mcp_server() -> FastMCP:
 
             async def _route(name_list: list[str], kind: str) -> None:
                 for nm in name_list:
+                    explicit_override = False
                     target_project_override: Project | None = None
                     target_name_override: str | None = None
+                    target_project_label: str | None = None
+
+                    # Explicit external addressing: project:<slug-or-key>#<AgentName>
                     if nm.startswith("project:") and "#" in nm:
+                        explicit_override = True
                         try:
                             _, rest = nm.split(":", 1)
                             slug_part, agent_part = rest.split("#", 1)
                             target_project_override = await _get_project_by_identifier(slug_part)
+                            target_project_label = target_project_override.human_key or target_project_override.slug
                             target_name_override = agent_part.strip()
                         except Exception:
-                            target_project_override = None
-                            target_name_override = None
+                            label = slug_part.strip() if "slug_part" in locals() and slug_part.strip() else "(invalid project)"
+                            unknown_external[label].append(nm.strip() or nm)
+                            continue
+
+                    # Alternate explicit format: <AgentName>@<project-identifier>
+                    if not explicit_override and "@" in nm:
+                        name_part, project_part = nm.split("@", 1)
+                        if name_part.strip() and project_part.strip():
+                            try:
+                                target_project_override = await _get_project_by_identifier(project_part.strip())
+                                target_project_label = target_project_override.human_key or target_project_override.slug
+                                target_name_override = name_part.strip()
+                                explicit_override = True
+                            except Exception:
+                                label = project_part.strip() or "(invalid project)"
+                                unknown_external[label].append(nm.strip() or nm)
+                                continue
                     if nm in local_names:
                         if kind == "to":
                             local_to.append(nm)
