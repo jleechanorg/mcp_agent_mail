@@ -27,7 +27,7 @@ async def test_macro_start_session_with_file_reservation_paths(isolated_env):
                 "human_key": "/test/project",
                 "program": "claude-code",
                 "model": "sonnet-4.5",
-                "agent_name": "BlueLake",  # ← Must be adjective+noun format
+                "agent_name": "BlueLake",  # ← Can be any alphanumeric string
                 "task_description": "Testing file reservations functionality",
                 "file_reservation_paths": ["src/**/*.py", "tests/**/*.py"],
                 "file_reservation_reason": "Testing macro_start_session with file reservations",
@@ -84,7 +84,7 @@ async def test_macro_start_session_without_file_reservations_still_works(isolate
                 "human_key": "/test/project2",
                 "program": "codex",
                 "model": "gpt-5",
-                "agent_name": "RedStone",  # ← Must be adjective+noun format
+                "agent_name": "RedStone",  # ← Can be any alphanumeric string
                 "task_description": "No file reservations test",
                 # file_reservation_paths intentionally omitted
                 "inbox_limit": 5,

@@ -2390,19 +2390,19 @@ def build_mcp_server() -> FastMCP:
 
         Semantics
         ---------
-        - If `name` is omitted, a random adjective+noun name is auto-generated.
+        - If `name` is omitted, a random adjective+noun name is auto-generated (e.g., "BlueLake").
         - Reusing the same `name` updates the profile (program/model/task) and
           refreshes `last_active_ts`.
         - A `profile.json` file is written under `agents/<Name>/` in the project archive.
 
         CRITICAL: Agent Naming Rules
         -----------------------------
-        - Agent names MUST be randomly generated adjective+noun combinations
-        - Examples: "GreenLake", "BlueDog", "RedStone", "PurpleBear"
-        - Names should be unique, easy to remember, and NOT descriptive
-        - INVALID examples: "BackendHarmonizer", "DatabaseMigrator", "UIRefactorer"
-        - The whole point: names should be memorable identifiers, not role descriptions
-        - Best practice: Omit the `name` parameter to auto-generate a valid name
+        - Agent names can be any alphanumeric string (letters and numbers only)
+        - Examples: "BlueLake", "streamf", "agent1", "BackendWorker"
+        - Names are globally unique across all projects
+        - Non-alphanumeric characters are automatically stripped during sanitization
+        - Names are limited to 128 characters
+        - Best practice: Use memorable, short names that are easy to reference
 
         Parameters
         ----------
@@ -2413,9 +2413,9 @@ def build_mcp_server() -> FastMCP:
         model : str
             The underlying model (e.g., "gpt5-codex", "opus-4.1").
         name : Optional[str]
-            MUST be a valid adjective+noun combination if provided (e.g., "BlueLake").
-            If omitted, a random valid name is auto-generated (RECOMMENDED).
-            Names are unique per project; passing the same name updates the profile.
+            Any alphanumeric string for the agent name (e.g., "BlueLake", "streamf", "agent1").
+            If omitted, a random adjective+noun name is auto-generated.
+            Names are globally unique; passing the same name updates the profile.
         task_description : str
             Short description of current focus (shows up in directory listings).
 
@@ -2442,8 +2442,8 @@ def build_mcp_server() -> FastMCP:
 
         Pitfalls
         --------
-        - Names MUST match the adjective+noun format or an error will be raised
-        - Names are case-insensitive unique. If you see "already in use", pick another or omit `name`.
+        - Names must be alphanumeric (non-alphanumeric characters are stripped automatically)
+        - Names are globally unique (case-insensitive). If you see "already in use", pick another or omit `name`.
         - Use the same `project_key` consistently across cooperating agents.
         """
         project = await _get_project_by_identifier(project_key)
@@ -2550,15 +2550,16 @@ def build_mcp_server() -> FastMCP:
         How this differs from `register_agent`
         --------------------------------------
         - Always creates a new identity with a fresh unique name (never updates an existing one).
-        - `name_hint`, if provided, MUST be a valid adjective+noun combination and must be available,
+        - `name_hint`, if provided, must be alphanumeric and globally available,
           otherwise an error is raised. Without a hint, a random adjective+noun name is generated.
 
         CRITICAL: Agent Naming Rules
         -----------------------------
-        - Agent names MUST be randomly generated adjective+noun combinations
-        - Examples: "GreenCastle", "BlueLake", "RedStone", "PurpleBear"
-        - Names should be unique, easy to remember, and NOT descriptive
-        - INVALID examples: "BackendHarmonizer", "DatabaseMigrator", "UIRefactorer"
+        - Agent names can be any alphanumeric string (letters and numbers only)
+        - Examples: "GreenCastle", "BlueLake", "streamf", "worker1", "BackendHarmonizer"
+        - Names are globally unique across all projects
+        - Non-alphanumeric characters are automatically stripped during sanitization
+        - Names are limited to 128 characters
         - Best practice: Omit `name_hint` to auto-generate a valid name (RECOMMENDED)
 
         When to use
