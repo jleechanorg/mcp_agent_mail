@@ -110,7 +110,7 @@ How to use effectively
 
 2) Across different repos in one project (e.g., Next.js frontend + FastAPI backend)
    - Option A (single project bus): register both sides under the same `project_key` (shared key/path). Keep reservation patterns specific (e.g., `frontend/**` vs `backend/**`).
-   - Option B (separate projects): each repo has its own `project_key`; use `macro_contact_handshake` or `request_contact`/`respond_contact` to link agents, then message directly. Keep a shared `thread_id` (e.g., ticket key) across repos for clean summaries/audits.
+   - Option B (separate projects): each repo has its own `project_key`; agents can message each other directly using `send_message` with cross-project addressing. Keep a shared `thread_id` (e.g., ticket key) across repos for clean summaries/audits.
 
 Macros vs granular tools
 - Prefer macros when you want speed or are on a smaller model: `macro_start_session`, `macro_prepare_thread`, `macro_file_reservation_cycle`, `macro_contact_handshake`.
@@ -255,7 +255,7 @@ Auth notes:
   - Shows a unified, reverse-chronological inbox of recent messages across all projects with excerpts, relative timestamps, sender/recipients, and project badges.
   - Below the inbox, lists all projects (slug, human name, created time) with sibling suggestions.
   - Suggests **likely sibling projects** when two slugs appear to be parts of the same product (e.g., backend vs. frontend). Suggestions are ranked with heuristics and, when `LLM_ENABLED=true`, an LLM pass across key docs (`README.md`, `AGENTS.md`, etc.).
-  - Humans can **Confirm Link** or **Dismiss** suggestions from the dashboard. Confirmed siblings become highlighted badges but *do not* automatically authorize cross-project messaging; agents must still establish `AgentLink` approvals via `request_contact`/`respond_contact`.
+  - Humans can **Confirm Link** or **Dismiss** suggestions from the dashboard. Confirmed siblings become highlighted badges for organizational clarity. Agents can message across projects directly without requiring contact approval.
 
 - `/mail/projects` (Projects index)
   - Dedicated projects list view; click a project to drill in.
@@ -469,24 +469,20 @@ If we let an LLM automatically authorize messaging between projects, we'd be:
 Instead, we give you **discovery + control**:
 - ✅ AI suggests likely relationships (safe, read-only analysis)
 - ✅ You confirm what makes sense (one click)
-- ✅ Agents still use `request_contact` / `respond_contact` for actual messaging permissions
-- ✅ Clear separation: discovery ≠ authorization
+- ✅ Confirmed links update UI badges for better organization
+- ✅ Agents can message across projects directly without additional approval
 
-#### The Complete Workflow
+#### The Workflow
 
-```
+```text
 1. System suggests: "These projects look related" (AI analysis)
            ↓
-2. You confirm: "Yes, link them" (updates UI badges)
+2. You confirm: "Yes, link them" (updates UI badges for clarity)
            ↓
-3. Agents request: request_contact(from_agent, to_agent, to_project)
-           ↓
-4. You approve: respond_contact(accept=true)
-           ↓
-5. Messages flow: Agents can now communicate across projects
+3. Agents communicate: send_message with cross-project addressing
 ```
 
-**Think of it like LinkedIn**: The system suggests connections, but only *you* decide who gets to send messages.
+**NOTE:** Contact approval is no longer required. Agents can send messages across projects directly.
 
 ### Search syntax (UI)
 
@@ -1292,28 +1288,28 @@ Goal: make coordination "just work" without spam across unrelated agents. The se
 - All tools require a `project_key`. Agents only see messages addressed to them within that project.
 - An agent working in Project A is invisible to agents in Project B unless explicit cross-project contact is established (see below). This avoids distraction between unrelated repositories.
 
-### Policies (per agent)
+### Policies (per agent) - OPTIONAL / NOT ENFORCED
+
+**NOTE: Contact policies are no longer enforced. All agents can send messages to each other directly without contact approval.**
+
+The following policy settings are maintained for backward compatibility but have no effect:
 
 - `open`: accept any targeted messages in the project.
-- `auto` (default): allow messages when there is obvious shared context (e.g., same thread participants; recent overlapping active file reservations; recent prior direct contact within a TTL); otherwise requires a contact request.
+- `auto` (default): allow messages when there is obvious shared context.
 - `contacts_only`: require an approved contact link first.
-- `block_all`: reject all new contacts (errors with CONTACT_BLOCKED).
+- `block_all`: reject all new contacts.
 
-Use `set_contact_policy(project_key, agent_name, policy)` to update.
+Use `set_contact_policy(project_key, agent_name, policy)` to update (optional).
 
-### Request/approve contact
+### Request/approve contact - OPTIONAL / NOT REQUIRED
+
+**NOTE: Contact approval is no longer required to send messages. Use `send_message` directly.**
+
+The following tools are maintained for backward compatibility and optional contact tracking:
 
 - `request_contact(project_key, from_agent, to_agent, reason?, ttl_seconds?)` creates or refreshes a pending link and sends a small ack_required "intro" message to the recipient.
 - `respond_contact(project_key, to_agent, from_agent, accept, ttl_seconds?)` approves or denies; approval grants messaging until expiry.
 - `list_contacts(project_key, agent_name)` surfaces current links.
-
-### Auto-allow heuristics (no explicit request required)
-
-- Same thread: replies or messages to thread participants are allowed.
-- Recent overlapping file reservations: if sender and recipient hold active file reservations in the project, messaging is allowed.
-- Recent prior contact: a sliding TTL allows follow-ups between the same pair.
-
-These heuristics minimize friction while preventing cold spam.
 
 ### Cross-project coordination (frontend vs backend repos)
 
@@ -1321,14 +1317,9 @@ When two repos represent the same underlying project (e.g., `frontend` and `back
 
 1) Use the same `project_key` across both workspaces. Agents in both repos operate under one project namespace and benefit from full inbox/outbox coordination automatically.
 
-2) Keep separate `project_key`s and establish explicit contact:
-   - In `backend`, agent `GreenCastle` calls:
-     - `request_contact(project_key="/abs/path/backend", from_agent="GreenCastle", to_agent="BlueLake", reason="API contract changes")`
-   - In `frontend`, `BlueLake` calls:
-     - `respond_contact(project_key="/abs/path/backend", to_agent="BlueLake", from_agent="GreenCastle", accept=true)`
-   - After approval, messages can be exchanged; in default `auto` policy the server allows follow-up threads/reservation-based coordination without re-requesting.
+2) Keep separate `project_key`s. Agents can message each other across projects directly using `send_message` with the `project:<slug>#<AgentName>` addressing format.
 
-Important: You can also create reciprocal links or set `open` policy for trusted pairs. The consent layer is **off by default** (CONTACT_ENFORCEMENT_ENABLED=false) to enable frictionless cross-project collaboration; set CONTACT_ENFORCEMENT_ENABLED=true to require explicit handshakes for all cross-project messaging.
+**NOTE:** Contact approval is no longer required for cross-project messaging. Contact enforcement has been removed to enable frictionless collaboration between agents.
 
 <!-- Consolidated in API Quick Reference → Tools below to avoid duplication -->
 
@@ -1560,7 +1551,7 @@ result = await client.call_tool("list_extended_tools", {})
 | `ACK_ESCALATION_CLAIM_TTL_SECONDS` | `3600` | TTL for escalation file reservations |
 | `ACK_ESCALATION_CLAIM_EXCLUSIVE` | `false` | Make escalation file reservation exclusive |
 | `ACK_ESCALATION_CLAIM_HOLDER_NAME` |  | Ops agent name to own escalation file reservations |
-| `CONTACT_ENFORCEMENT_ENABLED` | `false` | Enforce contact policy before messaging |
+| `CONTACT_ENFORCEMENT_ENABLED` | `false` | (Deprecated - enforcement removed) |
 | `CONTACT_AUTO_TTL_SECONDS` | `86400` | TTL for auto-approved contacts (1 day) |
 | `CONTACT_AUTO_RETRY_ENABLED` | `true` | Auto-retry contact requests on policy violations |
 | `MESSAGING_AUTO_REGISTER_RECIPIENTS` | `true` | Automatically create missing local recipients during `send_message` and retry routing |
@@ -1739,17 +1730,17 @@ This section has been removed to keep the README focused. Client code samples be
 | `create_agent_identity` | `create_agent_identity(project_key: str, program: str, model: str, name_hint?: str, task_description?: str, attachments_policy?: str)` | Agent profile dict | Always creates a new unique agent |
 | `send_message` | `send_message(project_key: str, sender_name: str, to: list[str], subject: str, body_md: str, cc?: list[str], bcc?: list[str], attachment_paths?: list[str], convert_images?: bool, importance?: str, ack_required?: bool, thread_id?: str, auto_contact_if_blocked?: bool)` | `{deliveries: list, count: int, attachments?}` | Writes canonical + inbox/outbox, converts images |
 | `reply_message` | `reply_message(project_key: str, message_id: int, sender_name: str, body_md: str, to?: list[str], cc?: list[str], bcc?: list[str], subject_prefix?: str)` | `{thread_id, reply_to, deliveries: list, count: int, attachments?}` | Preserves/creates thread, inherits flags |
-| `request_contact` | `request_contact(project_key: str, from_agent: str, to_agent: str, to_project?: str, reason?: str, ttl_seconds?: int)` | Contact link dict | Request permission to message another agent |
-| `respond_contact` | `respond_contact(project_key: str, to_agent: str, from_agent: str, accept: bool, from_project?: str, ttl_seconds?: int)` | Contact link dict | Approve or deny a contact request |
-| `list_contacts` | `list_contacts(project_key: str, agent_name: str)` | `list[dict]` | List contact links for an agent |
-| `set_contact_policy` | `set_contact_policy(project_key: str, agent_name: str, policy: str)` | Agent dict | Set policy: `open`, `auto`, `contacts_only`, `block_all` |
+| `request_contact` | `request_contact(project_key: str, from_agent: str, to_agent: str, to_project?: str, reason?: str, ttl_seconds?: int)` | Contact link dict | [OPTIONAL] Request permission to message another agent (no longer required) |
+| `respond_contact` | `respond_contact(project_key: str, to_agent: str, from_agent: str, accept: bool, from_project?: str, ttl_seconds?: int)` | Contact link dict | [OPTIONAL] Approve or deny a contact request (no longer required) |
+| `list_contacts` | `list_contacts(project_key: str, agent_name: str)` | `list[dict]` | [OPTIONAL] List contact links for an agent |
+| `set_contact_policy` | `set_contact_policy(project_key: str, agent_name: str, policy: str)` | Agent dict | [OPTIONAL] Set policy (not enforced) |
 | `fetch_inbox` | `fetch_inbox(project_key: str, agent_name: str, limit?: int, urgent_only?: bool, include_bodies?: bool, since_ts?: str)` | `list[dict]` | Non-mutating inbox read |
 | `mark_message_read` | `mark_message_read(project_key: str, agent_name: str, message_id: int)` | `{message_id, read, read_at}` | Per-recipient read receipt |
 | `acknowledge_message` | `acknowledge_message(project_key: str, agent_name: str, message_id: int)` | `{message_id, acknowledged, acknowledged_at, read_at}` | Sets ack and read |
 | `macro_start_session` | `macro_start_session(human_key: str, program: str, model: str, task_description?: str, agent_name?: str, file_reservation_paths?: list[str], file_reservation_reason?: str, file_reservation_ttl_seconds?: int, inbox_limit?: int)` | `{project, agent, file_reservations, inbox}` | Orchestrates ensure→register→optional file reservation→inbox fetch |
 | `macro_prepare_thread` | `macro_prepare_thread(project_key: str, thread_id: str, program: str, model: str, agent_name?: str, task_description?: str, register_if_missing?: bool, include_examples?: bool, inbox_limit?: int, include_inbox_bodies?: bool, llm_mode?: bool, llm_model?: str)` | `{project, agent, thread, inbox}` | Bundles registration, thread summary, and inbox context |
 | `macro_file_reservation_cycle` | `macro_file_reservation_cycle(project_key: str, agent_name: str, paths: list[str], ttl_seconds?: int, exclusive?: bool, reason?: str, auto_release?: bool)` | `{file_reservations, released}` | File Reservation + optionally release surfaces around a focused edit block |
-| `macro_contact_handshake` | `macro_contact_handshake(project_key: str, requester|agent_name: str, target|to_agent: str, to_project?: str, reason?: str, ttl_seconds?: int, auto_accept?: bool, welcome_subject?: str, welcome_body?: str)` | `{request, response, welcome_message}` | Automates contact request/approval and optional welcome ping |
+| `macro_contact_handshake` | `macro_contact_handshake(project_key: str, requester|agent_name: str, target|to_agent: str, to_project?: str, reason?: str, ttl_seconds?: int, auto_accept?: bool, welcome_subject?: str, welcome_body?: str)` | `{request, response, welcome_message}` | [OPTIONAL] Automates contact request/approval (no longer required; use send_message directly) |
 | `search_messages` | `search_messages(project_key: str, query: str, limit?: int)` | `list[dict]` | FTS5 search (bm25) |
 | `summarize_thread` | `summarize_thread(project_key: str, thread_id: str, include_examples?: bool, llm_mode?: bool, llm_model?: str)` | `{thread_id, summary, examples}` | Extracts participants, key points, actions |
 | `summarize_threads` | `summarize_threads(project_key: str, thread_ids: list[str], llm_mode?: bool, llm_model?: str, per_thread_limit?: int)` | `{threads[], aggregate}` | Digest across multiple threads (optional LLM refinement) |
