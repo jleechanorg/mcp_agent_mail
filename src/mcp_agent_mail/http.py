@@ -902,24 +902,42 @@ def build_http_app(settings: Settings, server=None) -> FastAPI:
         - Thread replies (for conversation threading)
         """
         try:
+            # Reject when Slack integration is disabled
+            if not settings.slack.enabled:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
             # Read raw body for signature verification
             body_bytes = await request.body()
-            body_text = body_bytes.decode("utf-8")
-            body_data = json.loads(body_text)
 
-            # Verify signature if signing secret is configured
+            # Verify signature before any parsing
             if settings.slack.signing_secret:
-                timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
-                signature = request.headers.get("X-Slack-Signature", "")
+                timestamp = request.headers.get("X-Slack-Request-Timestamp")
+                signature = request.headers.get("X-Slack-Signature")
+                if not timestamp or not signature:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Missing Slack signature headers"
+                    )
 
-                # Import SlackClient for signature verification
+                # Use static verification method
                 from .slack_integration import SlackClient
-                temp_client = SlackClient(settings.slack)
-                if not temp_client.verify_signature(timestamp, signature, body_bytes):
+                if not SlackClient.verify_signature(
+                    settings.slack.signing_secret,
+                    str(timestamp),
+                    str(signature),
+                    body_bytes
+                ):
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
                         detail="Invalid Slack signature"
                     )
+            else:
+                # Strongly recommended in production; proceed for dev only
+                structlog.get_logger("slack").warning("slack_signing_secret_missing")
+
+            # Now safely parse JSON
+            body_text = body_bytes.decode("utf-8")
+            body_data = json.loads(body_text)
 
             # Handle URL verification challenge (first-time setup)
             if body_data.get("type") == "url_verification":
@@ -953,6 +971,9 @@ def build_http_app(settings: Settings, server=None) -> FastAPI:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid JSON payload"
             )
+        except HTTPException as exc:
+            # Preserve intended status (e.g., 401/404)
+            raise exc
         except Exception as exc:
             logger_err = structlog.get_logger("slack")
             logger_err.error("slack_webhook_error", error=str(exc))

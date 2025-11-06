@@ -2223,10 +2223,16 @@ def build_mcp_server() -> FastMCP:
             f"Message {message.id} created by {sender.name} (to {', '.join(recipients_for_archive)})"
         )
 
-        # Send Slack notification if enabled (non-blocking)
+        # Send Slack notification if enabled (fire-and-forget, non-blocking)
         if _slack_client and settings.slack.enabled and settings.slack.notify_on_message:
-            try:
-                await notify_slack_message(
+            def _slack_done_cb(t: asyncio.Task) -> None:
+                try:
+                    _ = t.result()
+                except Exception as e:
+                    logger.warning(f"Failed to send Slack notification: {e}")
+
+            task = asyncio.create_task(
+                notify_slack_message(
                     client=_slack_client,
                     settings=settings,
                     message_id=str(message.id),
@@ -2237,9 +2243,8 @@ def build_mcp_server() -> FastMCP:
                     importance=importance,
                     thread_id=thread_id,
                 )
-            except Exception as e:
-                # Log but don't fail message delivery if Slack notification fails
-                logger.warning(f"Failed to send Slack notification: {e}")
+            )
+            task.add_done_callback(_slack_done_cb)
 
         if payload is None:
             raise RuntimeError("Message payload was not generated.")
@@ -7119,6 +7124,7 @@ def build_mcp_server() -> FastMCP:
                 Panel = _rp.Panel
                 Console().print(Panel.fit(f"channel={channel[:50]}, text={text[:100]}", title="tool: slack_post_message", border_style="green"))
             except Exception:
+                # Suppress all exceptions from rich logging to avoid interfering with tool execution
                 pass
 
         settings = get_settings()
@@ -7145,6 +7151,7 @@ def build_mcp_server() -> FastMCP:
                         message_ts=result["ts"],
                     )
                 except Exception:
+                    # Permalink retrieval is non-critical; ignore errors and proceed without permalink
                     pass
 
             await ctx.info(f"Posted message to Slack channel {channel}")
@@ -7207,6 +7214,7 @@ def build_mcp_server() -> FastMCP:
                 Panel = _rp.Panel
                 Console().print(Panel.fit("", title="tool: slack_list_channels", border_style="green"))
             except Exception:
+                # Suppress all exceptions from rich logging to avoid interfering with tool execution
                 pass
 
         settings = get_settings()
@@ -7282,6 +7290,7 @@ def build_mcp_server() -> FastMCP:
                 Panel = _rp.Panel
                 Console().print(Panel.fit(f"channel={channel}", title="tool: slack_get_channel_info", border_style="green"))
             except Exception:
+                # Suppress all exceptions from rich logging to avoid interfering with tool execution
                 pass
 
         settings = get_settings()
