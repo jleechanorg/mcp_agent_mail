@@ -2502,6 +2502,7 @@ def build_mcp_server() -> FastMCP:
 
         Semantics
         ---------
+        - If the project doesn't exist, it will be automatically created (you don't need to call `ensure_project` first).
         - If `name` is omitted, a random adjective+noun name is auto-generated (e.g., "BlueLake").
         - Reusing the same `name` updates the profile (program/model/task) and
           refreshes `last_active_ts`.
@@ -2519,7 +2520,9 @@ def build_mcp_server() -> FastMCP:
         Parameters
         ----------
         project_key : str
-            The same human key you passed to `ensure_project` (or equivalent identifier).
+            Any string identifier for your project. The project will be automatically created
+            if it doesn't exist. Common patterns include absolute paths, repo names, or custom
+            project identifiers (e.g., "/data/projects/backend", "my-repo", "project-alpha").
         program : str
             The agent program (e.g., "codex-cli", "claude-code").
         model : str
@@ -2558,7 +2561,10 @@ def build_mcp_server() -> FastMCP:
         - Names are globally unique (case-insensitive). If you see "already in use", pick another or omit `name`.
         - Use the same `project_key` consistently across cooperating agents.
         """
-        project = await _get_project_by_identifier(project_key)
+        # Auto-create project if it doesn't exist (allows any string as project_key)
+        project = await _ensure_project(project_key)
+        await ensure_archive(settings, project.slug)
+
         if settings.tools_log_enabled:
             try:
                 import importlib as _imp
