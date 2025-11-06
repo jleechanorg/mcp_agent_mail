@@ -63,7 +63,7 @@ async def test_direct_messaging_without_contact_approval(isolated_env, monkeypat
 
         assert len(inbox) == 1
         assert inbox[0]["subject"] == "Test message"
-        assert inbox[0]["sender"] == "AgentA"
+        assert inbox[0]["from"] == "AgentA"
 
 
 @pytest.mark.asyncio
@@ -250,7 +250,7 @@ async def test_cross_project_messaging_without_approval(isolated_env, monkeypatc
 
         assert len(inbox) == 1
         assert inbox[0]["subject"] == "Cross-project message"
-        assert inbox[0]["sender"] == "AgentA"
+        assert inbox[0]["from"] == "AgentA"
 
 
 @pytest.mark.asyncio
@@ -382,7 +382,7 @@ async def test_multiple_recipients_without_approval(isolated_env, monkeypatch):
 
             assert len(inbox) == 1
             assert inbox[0]["subject"] == "Broadcast message"
-            assert inbox[0]["sender"] == "Sender"
+            assert inbox[0]["from"] == "Sender"
 
 
 @pytest.mark.asyncio
