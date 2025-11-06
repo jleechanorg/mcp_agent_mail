@@ -2,49 +2,22 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
-from git import Repo
 
-from mcp_agent_mail.app import create_app
-from mcp_agent_mail.config import Settings
-from mcp_agent_mail.db import ensure_schema, get_session, init_engine
+from mcp_agent_mail.config import get_settings
+from mcp_agent_mail.db import ensure_schema, get_session
 from mcp_agent_mail.models import Agent, AgentLink, FileReservation, Message, MessageRecipient
 from mcp_agent_mail.storage import ensure_archive
 
 
 @pytest.fixture
-async def settings(tmp_path: Path) -> Settings:
-    """Create test settings with temporary paths."""
-    db_path = tmp_path / "test.db"
-    storage_root = tmp_path / "archive"
-    storage_root.mkdir(parents=True, exist_ok=True)
-
-    return Settings(
-        database_url=f"sqlite+aiosqlite:///{db_path}",
-        storage=Settings.Storage(
-            root=str(storage_root),
-            git_author_name="Test Bot",
-            git_author_email="test@example.com",
-        ),
-        agent_name_enforcement_mode="coerce",
-    )
-
-
-@pytest.fixture
-async def app_context(settings: Settings):
-    """Initialize database and return app."""
-    init_engine(settings)
-    await ensure_schema()
-    return await create_app(settings)
-
-
-@pytest.fixture
-async def project_and_agents(settings: Settings):
+async def project_and_agents(isolated_env):
     """Create a test project with two agents."""
+    settings = get_settings()
+    await ensure_schema()
+
     # Create project
     async with get_session() as session:
         from mcp_agent_mail.models import Project
@@ -107,9 +80,10 @@ class TestRenameAgent:
     """Tests for rename_agent functionality."""
 
     @pytest.mark.asyncio
-    async def test_rename_agent_uses_canonical_name(self, app_context, project_and_agents, settings):
+    async def test_rename_agent_uses_canonical_name(self, project_and_agents):
         """Test that rename uses canonical agent.name for filesystem operations, not user input."""
-        project, agent1, agent2, archive = project_and_agents
+        project, _agent1, _agent2, archive = project_and_agents
+        settings = get_settings()
 
         from mcp_agent_mail.app import _rename_agent
 
@@ -127,13 +101,14 @@ class TestRenameAgent:
         assert (new_dir / "profile.json").exists(), "Profile should exist in new location"
 
     @pytest.mark.asyncio
-    async def test_rename_agent_stages_entire_directory(self, app_context, project_and_agents, settings):
+    async def test_rename_agent_stages_entire_directory(self, project_and_agents):
         """Test that rename stages entire directory including inbox/outbox."""
-        project, agent1, agent2, archive = project_and_agents
+        project, _agent1, _agent2, archive = project_and_agents
+        settings = get_settings()
 
         from mcp_agent_mail.app import _rename_agent
 
-        renamed_agent = await _rename_agent(project, "BlueLake", "GreenCastle", settings)
+        _renamed_agent = await _rename_agent(project, "BlueLake", "GreenCastle", settings)
 
         # Verify all files moved
         new_dir = archive.root / "agents" / "GreenCastle"
@@ -148,9 +123,10 @@ class TestRenameAgent:
         assert "rename" in commit.message.lower()
 
     @pytest.mark.asyncio
-    async def test_rename_agent_fails_when_destination_exists(self, app_context, project_and_agents, settings):
+    async def test_rename_agent_fails_when_destination_exists(self, project_and_agents):
         """Test that rename fails when destination directory already exists."""
-        project, agent1, agent2, archive = project_and_agents
+        project, _agent1, _agent2, _archive = project_and_agents
+        settings = get_settings()
 
         from mcp_agent_mail.app import _rename_agent
 
@@ -159,9 +135,10 @@ class TestRenameAgent:
             await _rename_agent(project, "BlueLake", "RedMountain", settings)
 
     @pytest.mark.asyncio
-    async def test_rename_agent_creates_directory_if_old_not_exists(self, app_context, project_and_agents, settings):
+    async def test_rename_agent_creates_directory_if_old_not_exists(self, project_and_agents):
         """Test that rename creates new directory if old one doesn't exist on filesystem."""
-        project, agent1, agent2, archive = project_and_agents
+        project, _agent1, _agent2, archive = project_and_agents
+        settings = get_settings()
 
         # Remove the filesystem directory but keep DB entry
         import shutil
@@ -178,9 +155,10 @@ class TestRenameAgent:
         assert (new_dir / "profile.json").exists()
 
     @pytest.mark.asyncio
-    async def test_rename_agent_same_name_case_insensitive(self, app_context, project_and_agents, settings):
+    async def test_rename_agent_same_name_case_insensitive(self, project_and_agents):
         """Test that renaming to same name (case-insensitive) is rejected."""
-        project, agent1, agent2, archive = project_and_agents
+        project, _agent1, _agent2, _archive = project_and_agents
+        settings = get_settings()
 
         from mcp_agent_mail.app import _rename_agent
 
@@ -192,9 +170,10 @@ class TestDeleteAgent:
     """Tests for delete_agent functionality."""
 
     @pytest.mark.asyncio
-    async def test_delete_agent_blocks_when_has_sent_messages(self, app_context, project_and_agents, settings):
+    async def test_delete_agent_blocks_when_has_sent_messages(self, project_and_agents):
         """Test that delete fails when agent has sent messages."""
-        project, agent1, agent2, archive = project_and_agents
+        project, agent1, _agent2, _archive = project_and_agents
+        settings = get_settings()
 
         # Create a message sent by agent1
         async with get_session() as session:
@@ -216,9 +195,10 @@ class TestDeleteAgent:
             await _delete_agent(project, "BlueLake", settings)
 
     @pytest.mark.asyncio
-    async def test_delete_agent_blocks_when_has_received_messages(self, app_context, project_and_agents, settings):
+    async def test_delete_agent_blocks_when_has_received_messages(self, project_and_agents):
         """Test that delete fails when agent has received messages."""
-        project, agent1, agent2, archive = project_and_agents
+        project, agent1, agent2, _archive = project_and_agents
+        settings = get_settings()
 
         # Create a message received by agent1
         async with get_session() as session:
@@ -248,9 +228,10 @@ class TestDeleteAgent:
             await _delete_agent(project, "BlueLake", settings)
 
     @pytest.mark.asyncio
-    async def test_delete_agent_blocks_when_has_agent_links(self, app_context, project_and_agents, settings):
+    async def test_delete_agent_blocks_when_has_agent_links(self, project_and_agents):
         """Test that delete fails when agent has agent links."""
-        project, agent1, agent2, archive = project_and_agents
+        project, agent1, agent2, _archive = project_and_agents
+        settings = get_settings()
 
         # Create an agent link
         async with get_session() as session:
@@ -272,9 +253,10 @@ class TestDeleteAgent:
             await _delete_agent(project, "BlueLake", settings)
 
     @pytest.mark.asyncio
-    async def test_delete_agent_checks_unreleased_reservations_only(self, app_context, project_and_agents, settings):
+    async def test_delete_agent_checks_unreleased_reservations_only(self, project_and_agents):
         """Test that delete only blocks on unreleased, unexpired reservations."""
-        project, agent1, agent2, archive = project_and_agents
+        project, agent1, _agent2, _archive = project_and_agents
+        settings = get_settings()
 
         now = datetime.now(timezone.utc)
 
@@ -295,13 +277,14 @@ class TestDeleteAgent:
         from mcp_agent_mail.app import _delete_agent
 
         # Should succeed because reservation is released
-        result = await _delete_agent(project, "BlueLake", settings)
-        assert result["deleted"] is True
+        delete_result = await _delete_agent(project, "BlueLake", settings)
+        assert delete_result["deleted"] is True
 
     @pytest.mark.asyncio
-    async def test_delete_agent_blocks_on_active_unreleased_reservation(self, app_context, project_and_agents, settings):
+    async def test_delete_agent_blocks_on_active_unreleased_reservation(self, project_and_agents):
         """Test that delete blocks on active unreleased reservations."""
-        project, agent1, agent2, archive = project_and_agents
+        project, agent1, _agent2, _archive = project_and_agents
+        settings = get_settings()
 
         now = datetime.now(timezone.utc)
 
@@ -326,9 +309,10 @@ class TestDeleteAgent:
             await _delete_agent(project, "BlueLake", settings)
 
     @pytest.mark.asyncio
-    async def test_delete_agent_moves_to_trash(self, app_context, project_and_agents, settings):
+    async def test_delete_agent_moves_to_trash(self, project_and_agents):
         """Test that delete moves agent directory to trash."""
-        project, agent1, agent2, archive = project_and_agents
+        project, _agent1, _agent2, archive = project_and_agents
+        settings = get_settings()
 
         from mcp_agent_mail.app import _delete_agent
 
@@ -351,14 +335,15 @@ class TestDeleteAgent:
         assert result["agent"]["name"] == "BlueLake"
 
     @pytest.mark.asyncio
-    async def test_delete_agent_uses_canonical_name(self, app_context, project_and_agents, settings):
+    async def test_delete_agent_uses_canonical_name(self, project_and_agents):
         """Test that delete uses canonical agent.name for filesystem operations."""
-        project, agent1, agent2, archive = project_and_agents
+        project, _agent1, _agent2, archive = project_and_agents
+        settings = get_settings()
 
         from mcp_agent_mail.app import _delete_agent
 
         # Call with lowercase (user typo), should still work
-        result = await _delete_agent(project, "bluelake", settings)
+        _result = await _delete_agent(project, "bluelake", settings)
 
         # Verify moved to trash using canonical name
         trash_dir = archive.root / "agents" / ".trash" / "BlueLake"
