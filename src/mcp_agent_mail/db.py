@@ -232,6 +232,75 @@ def reset_database_state() -> None:
     _schema_lock = None
 
 
+def _check_and_fix_duplicate_agent_names(connection) -> None:
+    """Check for duplicate agent names and auto-rename to ensure global uniqueness.
+
+    This handles migration from the old schema (per-project uniqueness) to the new schema
+    (global uniqueness). Any duplicate names are automatically renamed by appending a number.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Find all duplicate names (case-insensitive)
+    cursor = connection.exec_driver_sql(
+        """
+        SELECT lower(name) as name_lower, COUNT(*) as count
+        FROM agents
+        GROUP BY name_lower
+        HAVING count > 1
+        """
+    )
+    duplicates = cursor.fetchall()
+
+    if not duplicates:
+        return  # No duplicates, safe to proceed
+
+    logger.warning(f"Found {len(duplicates)} agent name(s) used in multiple projects. Auto-renaming for global uniqueness...")
+
+    for name_lower, count in duplicates:
+        # Get all agents with this name
+        cursor = connection.exec_driver_sql(
+            """
+            SELECT id, name, project_id
+            FROM agents
+            WHERE lower(name) = ?
+            ORDER BY id
+            """,
+            (name_lower,),
+        )
+        agents = cursor.fetchall()
+
+        # Keep first occurrence, rename others
+        for i, (agent_id, original_name, project_id) in enumerate(agents):
+            if i == 0:
+                logger.info(f"  Keeping original: {original_name} (id={agent_id}, project_id={project_id})")
+                continue
+
+            # Generate new name by appending number (respecting 128-char limit)
+            max_name_length = 128  # keep in sync with Agent.name max_length
+            suffix = 2
+            while True:
+                suffix_str = str(suffix)
+                # Trim base name to leave room for suffix
+                trimmed_name = original_name[: max_name_length - len(suffix_str)]
+                new_name = f"{trimmed_name}{suffix_str}"
+                # Check if this new name exists
+                check = connection.exec_driver_sql(
+                    "SELECT COUNT(*) FROM agents WHERE lower(name) = lower(?)",
+                    (new_name,),
+                ).fetchone()[0]
+                if check == 0:
+                    break
+                suffix += 1
+
+            # Rename the agent
+            connection.exec_driver_sql(
+                "UPDATE agents SET name = ? WHERE id = ?",
+                (new_name, agent_id),
+            )
+            logger.info(f"  Renamed: {original_name} → {new_name} (id={agent_id}, project_id={project_id})")
+
+
 def _setup_fts(connection) -> None:
     connection.exec_driver_sql(
         "CREATE VIRTUAL TABLE IF NOT EXISTS fts_messages USING fts5(message_id UNINDEXED, subject, body)"
@@ -281,6 +350,17 @@ def _setup_fts(connection) -> None:
     )
     connection.exec_driver_sql(
         "CREATE INDEX IF NOT EXISTS idx_message_recipients_agent ON message_recipients(agent_id)"
+    )
+
+    # MIGRATION: Check for duplicate agent names before enforcing global uniqueness
+    # This handles upgrading from per-project uniqueness to global uniqueness
+    _check_and_fix_duplicate_agent_names(connection)
+
+    # Case-insensitive unique index on agent names for global uniqueness
+    # This prevents race conditions by enforcing uniqueness at the database level
+    # The check above ensures no duplicates exist, so this will succeed
+    connection.exec_driver_sql(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_agents_name_ci ON agents(lower(name))"
     )
 
 

@@ -24,7 +24,7 @@ from fastmcp import Context, FastMCP
 from git import Repo
 from git.exc import InvalidGitRepositoryError, NoSuchPathError
 from sqlalchemy import asc, desc, func, or_, select, text, update
-from sqlalchemy.exc import NoResultFound
+from sqlalchemy.exc import IntegrityError, NoResultFound
 from sqlalchemy.orm import aliased
 
 from . import rich_logger
@@ -1053,15 +1053,25 @@ async def _agent_name_exists(project: Project, name: str) -> bool:
         return result.first() is not None
 
 
+async def _agent_name_exists_globally(name: str) -> bool:
+    """Check if an agent name exists across ALL projects (globally unique)."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(Agent.id).where(func.lower(Agent.name) == name.lower())
+        )
+        return result.first() is not None
+
+
 async def _generate_unique_agent_name(
     project: Project,
     settings: Settings,
     name_hint: Optional[str] = None,
 ) -> str:
-    archive = await ensure_archive(settings, project.slug)
-
     async def available(candidate: str) -> bool:
-        return not await _agent_name_exists(project, candidate) and not (archive.root / "agents" / candidate).exists()
+        # Check globally across all projects for uniqueness
+        # Database is the source of truth - filesystem check removed
+        # (each project has separate archive directories, so filesystem check was project-specific)
+        return not await _agent_name_exists_globally(candidate)
 
     mode = getattr(settings, "agent_name_enforcement_mode", "coerce").lower()
     if name_hint:
@@ -1072,10 +1082,20 @@ async def _generate_unique_agent_name(
             if await available(sanitized):
                 return sanitized
             if mode == "strict":
-                raise ValueError(f"Agent name '{sanitized}' is already in use.")
+                raise ToolExecutionError(
+                    "NAME_TAKEN",
+                    f"Agent name '{sanitized}' is already in use globally.",
+                    recoverable=True,
+                    data={"name": sanitized},
+                )
         else:
             if mode == "strict":
-                raise ValueError("Name hint must contain alphanumeric characters.")
+                raise ToolExecutionError(
+                    "INVALID_ARGUMENT",
+                    "Name hint must contain alphanumeric characters.",
+                    recoverable=True,
+                    data={"name_hint": name_hint},
+                )
 
     for _ in range(1024):
         candidate = sanitize_agent_name(generate_agent_name())
@@ -1103,8 +1123,17 @@ async def _create_agent_record(
             task_description=task_description,
         )
         session.add(agent)
-        await session.commit()
-        await session.refresh(agent)
+        try:
+            await session.commit()
+            await session.refresh(agent)
+        except IntegrityError as exc:
+            await session.rollback()
+            raise ToolExecutionError(
+                "NAME_TAKEN",
+                f"Agent name '{name}' is already in use globally.",
+                recoverable=True,
+                data={"name": name},
+            ) from exc
         return agent
 
 
@@ -1125,10 +1154,34 @@ async def _get_or_create_agent(
         sanitized = sanitize_agent_name(name)
         if not sanitized:
             if mode == "strict":
-                raise ValueError("Agent name must contain alphanumeric characters.")
+                raise ToolExecutionError(
+                    "INVALID_ARGUMENT",
+                    "Agent name must contain alphanumeric characters.",
+                    recoverable=True,
+                    data={"name": name},
+                )
             desired_name = await _generate_unique_agent_name(project, settings, None)
         else:
-            desired_name = sanitized
+            # Check if the user-provided name is globally unique
+            if await _agent_name_exists_globally(sanitized):
+                # Name exists globally; check if it's in THIS project
+                if not await _agent_name_exists(project, sanitized):
+                    # Exists in another project, not this one - need unique name
+                    if mode == "strict":
+                        raise ToolExecutionError(
+                            "NAME_TAKEN",
+                            f"Agent name '{sanitized}' is already in use globally.",
+                            recoverable=True,
+                            data={"name": sanitized, "conflict": "other_project"},
+                        )
+                    # In coerce mode, generate a unique name
+                    desired_name = await _generate_unique_agent_name(project, settings, sanitized)
+                else:
+                    # Exists in this project, we'll update it below
+                    desired_name = sanitized
+            else:
+                # Globally unique, safe to use
+                desired_name = sanitized
     await ensure_schema()
     async with get_session() as session:
         # Use case-insensitive matching to be consistent with _agent_name_exists() and _get_agent()
@@ -1142,8 +1195,17 @@ async def _get_or_create_agent(
             agent.task_description = task_description
             agent.last_active_ts = datetime.now(timezone.utc)
             session.add(agent)
-            await session.commit()
-            await session.refresh(agent)
+            try:
+                await session.commit()
+                await session.refresh(agent)
+            except IntegrityError as exc:
+                await session.rollback()
+                raise ToolExecutionError(
+                    "NAME_TAKEN",
+                    f"Agent name '{desired_name}' is already in use globally.",
+                    recoverable=True,
+                    data={"name": desired_name},
+                ) from exc
         else:
             agent = Agent(
                 project_id=project.id,
@@ -1153,8 +1215,18 @@ async def _get_or_create_agent(
                 task_description=task_description,
             )
             session.add(agent)
-            await session.commit()
-            await session.refresh(agent)
+            try:
+                await session.commit()
+                await session.refresh(agent)
+            except IntegrityError as exc:
+                await session.rollback()
+                # Race condition: name was taken between our check and commit
+                raise ToolExecutionError(
+                    "NAME_TAKEN",
+                    f"Agent name '{desired_name}' is already in use globally (race condition detected). Please try again.",
+                    recoverable=True,
+                    data={"name": desired_name, "race_condition": True},
+                ) from exc
     archive = await ensure_archive(settings, project.slug)
     async with _archive_write_lock(archive):
         await write_agent_profile(archive, _agent_to_dict(agent))
@@ -2337,12 +2409,12 @@ def build_mcp_server() -> FastMCP:
 
         When to use
         -----------
-        - First call in a workflow targeting a new repo/path identifier.
+        - First call in a workflow targeting a new repo/path/project identifier.
         - As a guard before registering agents or sending messages.
 
         How it works
         ------------
-        - Validates that `human_key` is an absolute directory path (the agent's working directory).
+        - Accepts any string as the project identifier (human_key).
         - Computes a stable slug from `human_key` (lowercased, safe characters) so
           multiple agents can refer to the same project consistently.
         - Ensures DB row exists and that the on-disk archive is initialized
@@ -2350,19 +2422,22 @@ def build_mcp_server() -> FastMCP:
 
         CRITICAL: Project Identity Rules
         ---------------------------------
-        - The `human_key` MUST be the absolute path to the agent's working directory
-        - Two agents working in the SAME directory path are working on the SAME project
-        - Example: Both agents in /data/projects/smartedgar_mcp → SAME project
-        - Sibling projects are DIFFERENT directories (e.g., /data/projects/smartedgar_mcp
-          vs /data/projects/smartedgar_mcp_frontend)
+        - The `human_key` can be any string identifier for your project
+        - Common patterns: absolute paths, repo names, or custom project identifiers
+        - Two agents using the SAME human_key are working on the SAME project
+        - Example: Both agents using "smartedgar_mcp" → SAME project
+        - Different identifiers create DIFFERENT projects (e.g., "smartedgar_mcp"
+          vs "smartedgar_mcp_frontend")
 
         Parameters
         ----------
         human_key : str
-            The absolute path to the agent's working directory (e.g., "/data/projects/backend").
-            This MUST be an absolute path, not a relative path or arbitrary slug.
-            This is the canonical identifier for the project - all agents working in this
-            directory will share the same project identity.
+            Any string identifier for the project. Common patterns:
+            - Absolute path: "/data/projects/backend"
+            - Repository name: "my-repo"
+            - Custom identifier: "project-alpha"
+            This is the canonical identifier for the project - all agents using this
+            same key will share the same project identity.
 
         Returns
         -------
@@ -2371,7 +2446,7 @@ def build_mcp_server() -> FastMCP:
 
         Examples
         --------
-        JSON-RPC:
+        JSON-RPC with absolute path:
         ```json
         {
           "jsonrpc": "2.0",
@@ -2381,25 +2456,26 @@ def build_mcp_server() -> FastMCP:
         }
         ```
 
+        JSON-RPC with custom identifier:
+        ```json
+        {
+          "jsonrpc": "2.0",
+          "id": "2",
+          "method": "tools/call",
+          "params": {"name": "ensure_project", "arguments": {"human_key": "my-project-name"}}
+        }
+        ```
+
         Common mistakes
         ---------------
-        - Passing a relative path (e.g., "./backend") instead of an absolute path
-        - Using arbitrary slugs instead of the actual working directory path
-        - Creating separate projects for the same directory with different slugs
+        - Using different identifiers for the same project (creates duplicate projects)
+        - Not being consistent with the identifier format across agents
 
         Idempotency
         -----------
         - Safe to call multiple times. If the project already exists, the existing
           record is returned and the archive is ensured on disk (no destructive changes).
         """
-        # Validate that human_key is an absolute path (cross-platform)
-        if not Path(human_key).is_absolute():
-            raise ValueError(
-                f"human_key must be an absolute directory path, got: '{human_key}'. "
-                "Use the agent's working directory path (e.g., '/data/projects/backend' on Unix "
-                "or 'C:\\projects\\backend' on Windows)."
-            )
-
         await ctx.info(f"Ensuring project for key '{human_key}'.")
         project = await _ensure_project(human_key)
         await ensure_archive(settings, project.slug)
@@ -2426,19 +2502,19 @@ def build_mcp_server() -> FastMCP:
 
         Semantics
         ---------
-        - If `name` is omitted, a random adjective+noun name is auto-generated.
+        - If `name` is omitted, a random adjective+noun name is auto-generated (e.g., "BlueLake").
         - Reusing the same `name` updates the profile (program/model/task) and
           refreshes `last_active_ts`.
         - A `profile.json` file is written under `agents/<Name>/` in the project archive.
 
         CRITICAL: Agent Naming Rules
         -----------------------------
-        - Agent names MUST be randomly generated adjective+noun combinations
-        - Examples: "GreenLake", "BlueDog", "RedStone", "PurpleBear"
-        - Names should be unique, easy to remember, and NOT descriptive
-        - INVALID examples: "BackendHarmonizer", "DatabaseMigrator", "UIRefactorer"
-        - The whole point: names should be memorable identifiers, not role descriptions
-        - Best practice: Omit the `name` parameter to auto-generate a valid name
+        - Agent names can be any alphanumeric string (letters and numbers only)
+        - Examples: "BlueLake", "streamf", "agent1", "BackendWorker"
+        - Names are globally unique across all projects
+        - Non-alphanumeric characters are automatically stripped during sanitization
+        - Names are limited to 128 characters
+        - Best practice: Use memorable, short names that are easy to reference
 
         Parameters
         ----------
@@ -2449,9 +2525,9 @@ def build_mcp_server() -> FastMCP:
         model : str
             The underlying model (e.g., "gpt5-codex", "opus-4.1").
         name : Optional[str]
-            MUST be a valid adjective+noun combination if provided (e.g., "BlueLake").
-            If omitted, a random valid name is auto-generated (RECOMMENDED).
-            Names are unique per project; passing the same name updates the profile.
+            Any alphanumeric string for the agent name (e.g., "BlueLake", "streamf", "agent1").
+            If omitted, a random adjective+noun name is auto-generated.
+            Names are globally unique; passing the same name updates the profile.
         task_description : str
             Short description of current focus (shows up in directory listings).
 
@@ -2478,8 +2554,8 @@ def build_mcp_server() -> FastMCP:
 
         Pitfalls
         --------
-        - Names MUST match the adjective+noun format or an error will be raised
-        - Names are case-insensitive unique. If you see "already in use", pick another or omit `name`.
+        - Names must be alphanumeric (non-alphanumeric characters are stripped automatically)
+        - Names are globally unique (case-insensitive). If you see "already in use", pick another or omit `name`.
         - Use the same `project_key` consistently across cooperating agents.
         """
         project = await _get_project_by_identifier(project_key)
@@ -2586,15 +2662,16 @@ def build_mcp_server() -> FastMCP:
         How this differs from `register_agent`
         --------------------------------------
         - Always creates a new identity with a fresh unique name (never updates an existing one).
-        - `name_hint`, if provided, MUST be a valid adjective+noun combination and must be available,
+        - `name_hint`, if provided, must be alphanumeric and globally available,
           otherwise an error is raised. Without a hint, a random adjective+noun name is generated.
 
         CRITICAL: Agent Naming Rules
         -----------------------------
-        - Agent names MUST be randomly generated adjective+noun combinations
-        - Examples: "GreenCastle", "BlueLake", "RedStone", "PurpleBear"
-        - Names should be unique, easy to remember, and NOT descriptive
-        - INVALID examples: "BackendHarmonizer", "DatabaseMigrator", "UIRefactorer"
+        - Agent names can be any alphanumeric string (letters and numbers only)
+        - Examples: "GreenCastle", "BlueLake", "streamf", "worker1", "BackendHarmonizer"
+        - Names are globally unique across all projects
+        - Non-alphanumeric characters are automatically stripped during sanitization
+        - Names are limited to 128 characters
         - Best practice: Omit `name_hint` to auto-generate a valid name (RECOMMENDED)
 
         When to use
