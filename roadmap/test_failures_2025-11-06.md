@@ -66,3 +66,13 @@ Command: `uv run pytest` in a fresh clone of https://github.com/Dicklesworthston
   4. `tests/test_outbox_and_claims.py::test_renew_file_reservations_extends_expiry_and_updates_artifact` → renewed reservation timestamp is earlier than the original (timezone math bug).
   5. `tests/test_share_export.py::test_scrub_snapshot_pseudonymizes_and_clears` → summary reports `agents_pseudonymized == 0` though test expects 1 (pseudonymization no-op).
 - Conclusion: these failures are present in the upstream repository itself; fixing them will require upstream code changes, not just adjustments in our fork.
+
+### Severity snapshot
+
+| Area | Failure | Why it matters |
+|------|---------|----------------|
+| Share export CLI | `test_share_export_end_to_end` – schema mismatch (`thread_id` column missing) kills the export pipeline | Users literally can’t generate a bundle; flagship feature broken. |
+| HTTP RBAC | `test_rbac_denies_when_tool_name_missing` – returns 403 instead of 401 | Misleading status for unauthenticated clients; may break agents relying on 401 semantics. |
+| Messaging ACKs | `test_acknowledge_idempotent_multiple_calls` – ACK timestamp changes on repeat calls | Idempotence guarantee broken; retryable ACKs now double-book work. |
+| Reservation renewals | `test_renew_file_reservations_extends_expiry_and_updates_artifact` – renewed expiry earlier than original | Renewing a lease effectively shortens it, undermining reservations. |
+| Scrubber | `test_scrub_snapshot_pseudonymizes_and_clears` – agent names not pseudonymized | Shared bundles leak real agent names (privacy/security regression). |
