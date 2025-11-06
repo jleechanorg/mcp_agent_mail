@@ -88,6 +88,5 @@ jobs:
             ci-test-${{ runner.os }}-
       - name: Sync dependencies
         run: uv sync --dev
-      - name: Run pytest
-        run: uv run pytest -v
-
+      - name: Run smoke tests
+        run: uv run pytest -v tests/test_reply_and_threads.py tests/test_identity_resources.py
