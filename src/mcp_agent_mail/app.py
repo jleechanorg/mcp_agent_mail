@@ -8,6 +8,7 @@ import functools
 import inspect
 import json
 import logging
+import shutil
 import time
 from collections import defaultdict, deque
 from collections.abc import Sequence
@@ -35,6 +36,8 @@ from .llm import complete_system_user
 from .models import Agent, AgentLink, FileReservation, Message, MessageRecipient, Project, ProjectSiblingSuggestion
 from .storage import (
     ProjectArchive,
+    _commit,
+    _write_json,
     archive_write_lock,
     collect_lock_status,
     ensure_archive,
@@ -1273,17 +1276,20 @@ async def _rename_agent(
     if project.id is None:
         raise ValueError("Project must have an id before renaming agents.")
 
-    # Get the existing agent
+    # Get the existing agent (case-insensitive lookup)
     agent = await _get_agent(project, old_name)
+
+    # Use canonical agent name for filesystem operations
+    canonical_old_name = agent.name
 
     # Sanitize new name
     sanitized_new_name = sanitize_agent_name(new_name)
     if not sanitized_new_name:
         raise ValueError(f"New agent name '{new_name}' must contain alphanumeric characters.")
 
-    # Check if new name is already taken (case-insensitive)
-    if old_name.lower() == sanitized_new_name.lower():
-        raise ValueError(f"New name '{sanitized_new_name}' is the same as current name '{old_name}'.")
+    # Check if new name is already taken (case-insensitive, use canonical name)
+    if agent.name.lower() == sanitized_new_name.lower():
+        raise ValueError(f"New name '{sanitized_new_name}' is the same as current name '{agent.name}'.")
 
     if await _agent_name_exists(project, sanitized_new_name):
         raise ValueError(f"Agent name '{sanitized_new_name}' is already in use.")
@@ -1304,17 +1310,22 @@ async def _rename_agent(
     # Update archive
     archive = await ensure_archive(settings, project.slug)
     async with _archive_write_lock(archive):
-        from .storage import _commit
-        from .storage import _write_json  # Private but needed for manual profile write
-        import shutil
-
-        old_agent_dir = archive.root / "agents" / old_name
+        # Use canonical name for filesystem operations
+        old_agent_dir = archive.root / "agents" / canonical_old_name
         new_agent_dir = archive.root / "agents" / sanitized_new_name
         repo = archive.repo
 
-        # Move the directory if it exists
+        # Guard against destination existing (avoid nested directory creation)
+        if new_agent_dir.exists() and not old_agent_dir.exists():
+            raise ValueError(f"Archive target 'agents/{sanitized_new_name}' already exists.")
+
+        # Move the directory if it exists, otherwise create target directory
         if old_agent_dir.exists():
             await asyncio.to_thread(shutil.move, str(old_agent_dir), str(new_agent_dir))
+        else:
+            # Old directory doesn't exist on filesystem, create new one
+            await asyncio.to_thread(new_agent_dir.mkdir, parents=True, exist_ok=True)
+            logger.info(f"Created new agent directory for {sanitized_new_name} (old directory not found)")
 
         # Write the new profile JSON file
         profile_path = new_agent_dir / "profile.json"
@@ -1323,19 +1334,19 @@ async def _rename_agent(
         # Git operations: remove old directory from index
         def _remove_old():
             try:
-                repo.index.remove([f"agents/{old_name}"], r=True, ignore_unmatch=True)
-            except Exception:
-                pass
+                repo.index.remove([f"agents/{canonical_old_name}"], r=True, ignore_unmatch=True)
+            except Exception as exc:
+                logger.warning(f"Failed to remove old agent directory from git index: {exc}")
 
         await asyncio.to_thread(_remove_old)
 
-        # Commit the rename with new profile path (will be added by _commit)
-        rel_path = profile_path.relative_to(archive.repo_root).as_posix()
+        # Commit the rename by staging the entire new agent directory
+        new_dir_rel = new_agent_dir.relative_to(archive.repo_root).as_posix()
         await _commit(
             repo,
             archive.settings,
-            f"agent: rename {old_name} → {sanitized_new_name}",
-            [rel_path],
+            f"agent: rename {canonical_old_name} → {sanitized_new_name}",
+            [new_dir_rel],
         )
 
     return agent
@@ -1350,6 +1361,7 @@ async def _delete_agent(
     Delete an agent and move to trash in archive.
 
     - Validates agent exists
+    - Checks for foreign key references (messages, links)
     - Checks for active file reservations
     - Deletes from database
     - Moves archive to trash
@@ -1358,29 +1370,70 @@ async def _delete_agent(
     if project.id is None:
         raise ValueError("Project must have an id before deleting agents.")
 
-    # Get the agent
+    # Get the agent (case-insensitive lookup)
     agent = await _get_agent(project, agent_name)
 
-    # Check for active file reservations
+    # Use canonical agent name for filesystem operations
+    canonical_name = agent.name
+
+    # Store agent info before deletion
+    agent_dict = _agent_to_dict(agent)
+
+    # Check for foreign key references and active reservations
     await ensure_schema()
     async with get_session() as session:
+        # Check for sent messages
+        sent_count = (await session.execute(
+            select(func.count(Message.id)).where(
+                Message.project_id == project.id,
+                Message.sender_id == agent.id
+            )
+        )).scalar_one()
+
+        # Check for received messages
+        recv_count = (await session.execute(
+            select(func.count(MessageRecipient.message_id)).where(
+                MessageRecipient.agent_id == agent.id
+            )
+        )).scalar_one()
+
+        # Check for agent links
+        links_count = (await session.execute(
+            select(func.count(AgentLink.id)).where(
+                or_(
+                    AgentLink.a_agent_id == agent.id,
+                    AgentLink.b_agent_id == agent.id
+                ),
+                or_(
+                    AgentLink.a_project_id == project.id,
+                    AgentLink.b_project_id == project.id
+                )
+            )
+        )).scalar_one()
+
+        if sent_count or recv_count or links_count:
+            raise ValueError(
+                f"Cannot delete '{canonical_name}': referenced by messages "
+                f"(sent={sent_count}, recv={recv_count}) or links={links_count}. "
+                "Delete dependent records first."
+            )
+
+        # Check for active unreleased file reservations
         result = await session.execute(
             select(FileReservation).where(
                 FileReservation.project_id == project.id,
                 FileReservation.agent_id == agent.id,
-                FileReservation.expires_ts > datetime.now(timezone.utc),
+                cast(Any, FileReservation.released_ts).is_(None),  # Only unreleased
+                FileReservation.expires_ts > datetime.now(timezone.utc),  # Not expired
             )
         )
         active_reservations = result.scalars().all()
 
         if active_reservations:
             raise ValueError(
-                f"Cannot delete agent '{agent_name}' with {len(active_reservations)} active file reservation(s). "
+                f"Cannot delete agent '{canonical_name}' with {len(active_reservations)} active file reservation(s). "
                 "Release or wait for reservations to expire first."
             )
-
-    # Store agent info before deletion
-    agent_dict = _agent_to_dict(agent)
 
     # Delete from database
     async with get_session() as session:
@@ -1392,42 +1445,42 @@ async def _delete_agent(
     # Move archive to trash
     archive = await ensure_archive(settings, project.slug)
     async with _archive_write_lock(archive):
-        agent_dir = archive.root / "agents" / agent_name
-        trash_dir = archive.root / "agents" / ".trash" / agent_name
+        # Use canonical name for filesystem operations
+        agent_dir = archive.root / "agents" / canonical_name
+        trash_dir = archive.root / "agents" / ".trash" / canonical_name
+        repo = archive.repo
 
         if agent_dir.exists():
-            import shutil
             # Ensure trash directory exists
             await asyncio.to_thread(trash_dir.parent.mkdir, parents=True, exist_ok=True)
 
             # Move to trash
             await asyncio.to_thread(shutil.move, str(agent_dir), str(trash_dir))
 
-            # Commit the deletion
-            from .storage import _commit
-            repo = archive.repo
+            # Remove from Git and add trash directory
+            def _git_operations():
+                try:
+                    repo.index.remove([f"agents/{canonical_name}"], r=True, ignore_unmatch=True)
+                    # Add trash directory
+                    trash_rel = f"agents/.trash/{canonical_name}"
+                    repo.index.add([trash_rel])
+                except Exception as exc:
+                    logger.warning(f"Failed to update git index for agent deletion: {exc}")
 
-            # Remove from Git
-            def _remove():
-                repo.index.remove([f"agents/{agent_name}"], r=True, ignore_unmatch=True)
-                # Add trash directory
-                trash_rel = f"agents/.trash/{agent_name}"
-                repo.index.add([trash_rel])
-
-            await asyncio.to_thread(_remove)
+            await asyncio.to_thread(_git_operations)
 
             # Commit
             await _commit(
                 repo,
                 archive.settings,
-                f"agent: delete {agent_name}",
-                [f"agents/.trash/{agent_name}"],
+                f"agent: delete {canonical_name}",
+                [],  # Already added to index above
             )
 
     return {
         "deleted": True,
         "agent": agent_dict,
-        "message": f"Agent '{agent_name}' has been deleted and moved to trash.",
+        "message": f"Agent '{canonical_name}' has been deleted and moved to trash.",
     }
 
 
