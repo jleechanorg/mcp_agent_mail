@@ -3273,7 +3273,12 @@ def build_mcp_server() -> FastMCP:
 
         async with get_session() as sx:
             # Preload local agent names (normalized -> canonical stored name)
-            existing = await sx.execute(select(Agent.name).where(Agent.project_id == project.id))
+            existing = await sx.execute(
+                select(Agent.name).where(
+                    Agent.project_id == project.id,
+                    cast(Any, Agent.is_active).is_(True),
+                )
+            )
             local_lookup: dict[str, str] = {}
             for row in existing.fetchall():
                 canonical_name = (row[0] or "").strip()
@@ -6344,7 +6349,10 @@ def build_mcp_server() -> FastMCP:
             # Get all active agents in the project
             result = await session.execute(
                 select(Agent)
-                .where(Agent.project_id == project.id, cast(Any, Agent.is_active).is_(True))
+                .where(
+                    Agent.project_id == project.id,
+                    cast(Any, Agent.is_active).is_(True),
+                )
                 .order_by(desc(Agent.last_active_ts))
             )
             agents = result.scalars().all()
