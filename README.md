@@ -474,7 +474,7 @@ Instead, we give you **discovery + control**:
 
 #### The Workflow
 
-```
+```text
 1. System suggests: "These projects look related" (AI analysis)
            ↓
 2. You confirm: "Yes, link them" (updates UI badges for clarity)
@@ -482,7 +482,7 @@ Instead, we give you **discovery + control**:
 3. Agents communicate: send_message with cross-project addressing
 ```
 
-**NOTE:** Contact approval is no longer required. Agents can send messages across projects directly. If you need explicit approval workflows, enable CONTACT_ENFORCEMENT_ENABLED in your configuration.
+**NOTE:** Contact approval is no longer required. Agents can send messages across projects directly.
 
 ### Search syntax (UI)
 
@@ -1290,9 +1290,9 @@ Goal: make coordination "just work" without spam across unrelated agents. The se
 
 ### Policies (per agent) - OPTIONAL / NOT ENFORCED
 
-**NOTE: Contact policies are no longer enforced by default. All agents can send messages to each other directly without contact approval.**
+**NOTE: Contact policies are no longer enforced. All agents can send messages to each other directly without contact approval.**
 
-The following policy settings are maintained for backward compatibility but have no effect unless `CONTACT_ENFORCEMENT_ENABLED=true` is set:
+The following policy settings are maintained for backward compatibility but have no effect:
 
 - `open`: accept any targeted messages in the project.
 - `auto` (default): allow messages when there is obvious shared context.
@@ -1319,7 +1319,7 @@ When two repos represent the same underlying project (e.g., `frontend` and `back
 
 2) Keep separate `project_key`s. Agents can message each other across projects directly using `send_message` with the `project:<slug>#<AgentName>` addressing format.
 
-**NOTE:** Contact approval is no longer required for cross-project messaging. The consent layer is **off by default** (CONTACT_ENFORCEMENT_ENABLED=false) to enable frictionless collaboration. If you need explicit contact approval workflows, set CONTACT_ENFORCEMENT_ENABLED=true in your configuration.
+**NOTE:** Contact approval is no longer required for cross-project messaging. Contact enforcement has been removed to enable frictionless collaboration between agents.
 
 <!-- Consolidated in API Quick Reference → Tools below to avoid duplication -->
 
@@ -1551,7 +1551,7 @@ result = await client.call_tool("list_extended_tools", {})
 | `ACK_ESCALATION_CLAIM_TTL_SECONDS` | `3600` | TTL for escalation file reservations |
 | `ACK_ESCALATION_CLAIM_EXCLUSIVE` | `false` | Make escalation file reservation exclusive |
 | `ACK_ESCALATION_CLAIM_HOLDER_NAME` |  | Ops agent name to own escalation file reservations |
-| `CONTACT_ENFORCEMENT_ENABLED` | `false` | Enforce contact policy before messaging |
+| `CONTACT_ENFORCEMENT_ENABLED` | `false` | (Deprecated - enforcement removed) |
 | `CONTACT_AUTO_TTL_SECONDS` | `86400` | TTL for auto-approved contacts (1 day) |
 | `CONTACT_AUTO_RETRY_ENABLED` | `true` | Auto-retry contact requests on policy violations |
 | `MESSAGING_AUTO_REGISTER_RECIPIENTS` | `true` | Automatically create missing local recipients during `send_message` and retry routing |
@@ -1733,7 +1733,7 @@ This section has been removed to keep the README focused. Client code samples be
 | `request_contact` | `request_contact(project_key: str, from_agent: str, to_agent: str, to_project?: str, reason?: str, ttl_seconds?: int)` | Contact link dict | [OPTIONAL] Request permission to message another agent (no longer required) |
 | `respond_contact` | `respond_contact(project_key: str, to_agent: str, from_agent: str, accept: bool, from_project?: str, ttl_seconds?: int)` | Contact link dict | [OPTIONAL] Approve or deny a contact request (no longer required) |
 | `list_contacts` | `list_contacts(project_key: str, agent_name: str)` | `list[dict]` | [OPTIONAL] List contact links for an agent |
-| `set_contact_policy` | `set_contact_policy(project_key: str, agent_name: str, policy: str)` | Agent dict | [OPTIONAL] Set policy (not enforced unless CONTACT_ENFORCEMENT_ENABLED=true) |
+| `set_contact_policy` | `set_contact_policy(project_key: str, agent_name: str, policy: str)` | Agent dict | [OPTIONAL] Set policy (not enforced) |
 | `fetch_inbox` | `fetch_inbox(project_key: str, agent_name: str, limit?: int, urgent_only?: bool, include_bodies?: bool, since_ts?: str)` | `list[dict]` | Non-mutating inbox read |
 | `mark_message_read` | `mark_message_read(project_key: str, agent_name: str, message_id: int)` | `{message_id, read, read_at}` | Per-recipient read receipt |
 | `acknowledge_message` | `acknowledge_message(project_key: str, agent_name: str, message_id: int)` | `{message_id, acknowledged, acknowledged_at, read_at}` | Sets ack and read |

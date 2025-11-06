@@ -560,9 +560,9 @@ Align with an existing discussion thread:
 
 ### Contact Policies (OPTIONAL - NOT ENFORCED)
 
-**NOTE: Contact policies are no longer enforced by default. All agents can message each other directly without approval.**
+**NOTE: Contact policies are no longer enforced. All agents can message each other directly without approval.**
 
-This feature is maintained for backward compatibility. To enable policy enforcement, set `CONTACT_ENFORCEMENT_ENABLED=true` in your configuration.
+This feature is maintained for backward compatibility only.
 
 ```json
 {
