@@ -6,11 +6,9 @@ import base64
 import binascii
 import configparser
 import hashlib
-import hmac
 import json
 import os
 import re
-import secrets
 import shutil
 import sqlite3
 import subprocess
