@@ -8,7 +8,7 @@ import pytest
 
 from mcp_agent_mail.config import get_settings
 from mcp_agent_mail.db import ensure_schema, get_session
-from mcp_agent_mail.models import Agent, AgentLink, FileReservation, Message, MessageRecipient
+from mcp_agent_mail.models import Agent, AgentLink, FileReservation, Message, MessageRecipient, Project
 from mcp_agent_mail.storage import ensure_archive
 
 
@@ -20,7 +20,6 @@ async def project_and_agents(isolated_env):
 
     # Create project
     async with get_session() as session:
-        from mcp_agent_mail.models import Project
         project = Project(human_key="/tmp/test-project", slug="test-project")
         session.add(project)
         await session.commit()
