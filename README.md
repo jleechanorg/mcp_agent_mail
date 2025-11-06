@@ -1266,6 +1266,7 @@ sequenceDiagram
 
 - Identity
   - Names can be any sanitized alphanumeric string and are globally unique; if you omit `name` (or it conflicts), the server generates an adjective+noun codename, and any `name_hint` is sanitized (alnum) before use
+  - Reusing a name automatically retires the previous identity (history stays readable) so you can reclaim favorite handles without manual cleanup
   - `whois` returns the stored profile; `list_agents` can filter by recent activity
   - `last_active_ts` is bumped on relevant interactions (messages, inbox checks, etc.)
 - Threads

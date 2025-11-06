@@ -899,12 +899,16 @@ def main() -> None:
         if not selected_indices:
             console.print("[yellow]Saved project selection invalid, please select again[/]")
             selected_projects = select_projects(projects_list)
+            scrub_preset = select_scrub_preset()
             selected_indices = [i for i, p in enumerate(projects_list) if p["human_key"] in selected_projects]
+            use_last_config = False
+            saved_config = None
         else:
             selected_projects = [projects_list[idx]["human_key"] for idx in selected_indices]
             console.print(f"[green]Using saved selection: {len(selected_projects)} project(s)[/]")
 
-        scrub_preset = saved_config.get("scrub_preset", "standard")
+        if use_last_config and saved_config is not None:
+            scrub_preset = saved_config.get("scrub_preset", "standard")
 
     # Signing key (use saved preference if available)
     signing_key = None

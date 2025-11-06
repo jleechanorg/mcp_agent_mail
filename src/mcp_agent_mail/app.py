@@ -601,6 +601,8 @@ def _agent_to_dict(agent: Agent) -> dict[str, Any]:
         "last_active_ts": _iso(agent.last_active_ts),
         "project_id": agent.project_id,
         "attachments_policy": getattr(agent, "attachments_policy", "auto"),
+        "is_active": getattr(agent, "is_active", True),
+        "deleted_ts": _iso(getattr(agent, "deleted_ts", None)),
     }
 
 
@@ -669,6 +671,15 @@ async def _get_project_by_identifier(identifier: str) -> Project:
         project = result.scalars().first()
         if not project:
             raise NoResultFound(f"Project '{identifier}' not found.")
+        return project
+
+
+async def _get_project_by_id(project_id: int) -> Project:
+    await ensure_schema()
+    async with get_session() as session:
+        project = await session.get(Project, project_id)
+        if not project:
+            raise NoResultFound(f"Project id '{project_id}' not found.")
         return project
 
 
@@ -1048,7 +1059,11 @@ async def _agent_name_exists(project: Project, name: str) -> bool:
         raise ValueError("Project must have an id before querying agents.")
     async with get_session() as session:
         result = await session.execute(
-            select(Agent.id).where(Agent.project_id == project.id, func.lower(Agent.name) == name.lower())
+            select(Agent.id).where(
+                Agent.project_id == project.id,
+                func.lower(Agent.name) == name.lower(),
+                cast(Any, Agent.is_active).is_(True),
+            )
         )
         return result.first() is not None
 
@@ -1057,7 +1072,7 @@ async def _agent_name_exists_globally(name: str) -> bool:
     """Check if an agent name exists across ALL projects (globally unique)."""
     async with get_session() as session:
         result = await session.execute(
-            select(Agent.id).where(func.lower(Agent.name) == name.lower())
+            select(Agent.id).where(func.lower(Agent.name) == name.lower(), cast(Any, Agent.is_active).is_(True))
         )
         return result.first() is not None
 
@@ -1066,6 +1081,9 @@ async def _generate_unique_agent_name(
     project: Project,
     settings: Settings,
     name_hint: Optional[str] = None,
+    *,
+    retire_conflicts: bool = False,
+    include_same_project_conflicts: bool = False,
 ) -> str:
     async def available(candidate: str) -> bool:
         # Check globally across all projects for uniqueness
@@ -1081,6 +1099,15 @@ async def _generate_unique_agent_name(
         if sanitized:
             if await available(sanitized):
                 return sanitized
+            if retire_conflicts and mode != "strict":
+                await _retire_conflicting_agents(
+                    sanitized,
+                    project_to_keep=project,
+                    settings=settings,
+                    include_same_project=include_same_project_conflicts,
+                )
+                if await available(sanitized):
+                    return sanitized
             if mode == "strict":
                 raise ToolExecutionError(
                     "NAME_TAKEN",
@@ -1165,8 +1192,10 @@ async def _get_or_create_agent(
             # Check if the user-provided name is globally unique
             if await _agent_name_exists_globally(sanitized):
                 # Name exists globally; check if it's in THIS project
-                if not await _agent_name_exists(project, sanitized):
-                    # Exists in another project, not this one - need unique name
+                if await _agent_name_exists(project, sanitized):
+                    # Exists in this project, we'll update it below
+                    desired_name = sanitized
+                else:
                     if mode == "strict":
                         raise ToolExecutionError(
                             "NAME_TAKEN",
@@ -1174,10 +1203,13 @@ async def _get_or_create_agent(
                             recoverable=True,
                             data={"name": sanitized, "conflict": "other_project"},
                         )
-                    # In coerce mode, generate a unique name
-                    desired_name = await _generate_unique_agent_name(project, settings, sanitized)
-                else:
-                    # Exists in this project, we'll update it below
+                    # Retire conflicting agents in other projects so this project can take the name.
+                    await _retire_conflicting_agents(
+                        sanitized,
+                        project_to_keep=project,
+                        settings=settings,
+                        include_same_project=False,
+                    )
                     desired_name = sanitized
             else:
                 # Globally unique, safe to use
@@ -1186,7 +1218,11 @@ async def _get_or_create_agent(
     async with get_session() as session:
         # Use case-insensitive matching to be consistent with _agent_name_exists() and _get_agent()
         result = await session.execute(
-            select(Agent).where(Agent.project_id == project.id, func.lower(Agent.name) == desired_name.lower())
+            select(Agent).where(
+                Agent.project_id == project.id,
+                func.lower(Agent.name) == desired_name.lower(),
+                cast(Any, Agent.is_active).is_(True),
+            )
         )
         agent = result.scalars().first()
         if agent:
@@ -1194,6 +1230,8 @@ async def _get_or_create_agent(
             agent.model = model
             agent.task_description = task_description
             agent.last_active_ts = datetime.now(timezone.utc)
+            agent.is_active = True
+            agent.deleted_ts = None
             session.add(agent)
             try:
                 await session.commit()
@@ -1295,7 +1333,7 @@ async def _ensure_cross_project_link(
         return link
 
 
-async def _lookup_agents_any_project(name: str) -> list[tuple[Project, Agent]]:
+async def _lookup_agents_any_project(name: str, include_inactive: bool = False) -> list[tuple[Project, Agent]]:
     """Return all (project, agent) pairs matching a given agent name globally."""
 
     target = (name or "").strip()
@@ -1303,19 +1341,78 @@ async def _lookup_agents_any_project(name: str) -> list[tuple[Project, Agent]]:
         return []
     await ensure_schema()
     async with get_session() as session:
-        result = await session.execute(
+        stmt = (
             select(Project, Agent)
             .join(Agent, Agent.project_id == Project.id)
             .where(func.lower(Agent.name) == target.lower())
         )
+        if not include_inactive:
+            stmt = stmt.where(cast(Any, Agent.is_active).is_(True))
+        result = await session.execute(stmt)
         return [(proj, agent) for proj, agent in result.all() if proj and agent]
+
+
+async def _retire_agent(agent: Agent, project: Project, settings: Settings) -> Agent:
+    """Mark an agent inactive so its name can be reused elsewhere (history is preserved)."""
+
+    if agent.id is None:
+        return agent
+    await ensure_schema()
+    async with get_session() as session:
+        db_agent = await session.get(Agent, agent.id)
+        if db_agent is None or not getattr(db_agent, "is_active", True):
+            return agent
+        db_agent.is_active = False
+        db_agent.deleted_ts = datetime.now(timezone.utc)
+        session.add(db_agent)
+        # Release any outstanding reservations
+        await session.execute(
+            update(FileReservation)
+            .where(
+                FileReservation.agent_id == db_agent.id,
+                cast(Any, FileReservation.released_ts).is_(None),
+            )
+            .values(released_ts=datetime.now(timezone.utc))
+        )
+        await session.commit()
+        await session.refresh(db_agent)
+        agent = db_agent
+
+    archive = await ensure_archive(settings, project.slug)
+    async with _archive_write_lock(archive):
+        await write_agent_profile(archive, _agent_to_dict(agent))
+    return agent
+
+
+async def _retire_conflicting_agents(
+    name: str,
+    *,
+    project_to_keep: Project,
+    settings: Settings,
+    include_same_project: bool = False,
+) -> None:
+    """Retire any active agents with the requested name outside the current project."""
+
+    conflicts = [
+        (proj, agent)
+        for proj, agent in await _lookup_agents_any_project(name)
+        if include_same_project or proj.id != project_to_keep.id
+    ]
+    if not conflicts:
+        return
+    for conflict_project, conflict_agent in conflicts:
+        await _retire_agent(conflict_agent, conflict_project, settings)
 
 
 async def _get_agent(project: Project, name: str) -> Agent:
     await ensure_schema()
     async with get_session() as session:
         result = await session.execute(
-            select(Agent).where(Agent.project_id == project.id, func.lower(Agent.name) == name.lower())
+            select(Agent).where(
+                Agent.project_id == project.id,
+                func.lower(Agent.name) == name.lower(),
+                cast(Any, Agent.is_active).is_(True),
+            )
         )
         agent = result.scalars().first()
         if not agent:
@@ -1324,6 +1421,19 @@ async def _get_agent(project: Project, name: str) -> Agent:
                 f"Tip: Use resource://agents/{project.slug} to discover registered agents."
             )
         return agent
+
+
+async def _get_agent_optional(project: Project, name: str) -> Agent | None:
+    await ensure_schema()
+    async with get_session() as session:
+        result = await session.execute(
+            select(Agent).where(
+                Agent.project_id == project.id,
+                func.lower(Agent.name) == name.lower(),
+                cast(Any, Agent.is_active).is_(True),
+            )
+        )
+        return result.scalars().first()
 
 
 async def _create_message(
@@ -2506,6 +2616,7 @@ def build_mcp_server() -> FastMCP:
         - Reusing the same `name` updates the profile (program/model/task) and
           refreshes `last_active_ts`.
         - A `profile.json` file is written under `agents/<Name>/` in the project archive.
+        - Providing a name that is active in another project automatically retires that identity so you can claim the handle.
 
         CRITICAL: Agent Naming Rules
         -----------------------------
@@ -2662,8 +2773,7 @@ def build_mcp_server() -> FastMCP:
         How this differs from `register_agent`
         --------------------------------------
         - Always creates a new identity with a fresh unique name (never updates an existing one).
-        - `name_hint`, if provided, must be alphanumeric and globally available,
-          otherwise an error is raised. Without a hint, the server auto-generates a random codename (currently adjective+noun).
+        - `name_hint`, if provided, must be alphanumeric; if it matches an active agent, that identity is retired automatically before provisioning the new profile. Without a hint, the server auto-generates a random codename (currently adjective+noun).
 
         CRITICAL: Agent Naming Rules
         -----------------------------
@@ -2702,7 +2812,13 @@ def build_mcp_server() -> FastMCP:
         ```
         """
         project = await _get_project_by_identifier(project_key)
-        unique_name = await _generate_unique_agent_name(project, settings, name_hint)
+        unique_name = await _generate_unique_agent_name(
+            project,
+            settings,
+            name_hint,
+            retire_conflicts=bool(name_hint),
+            include_same_project_conflicts=bool(name_hint),
+        )
         ap = (attachments_policy or "auto").lower()
         if ap not in {"auto", "inline", "file"}:
             ap = "auto"
@@ -3277,6 +3393,7 @@ def build_mcp_server() -> FastMCP:
                                 AgentLink.status == "approved",
                                 Project.id == target_project_override.id,
                                 func.lower(Agent.name) == lookup_value,
+                                cast(Any, Agent.is_active).is_(True),
                             )
                             .limit(1)
                         )
@@ -3290,6 +3407,7 @@ def build_mcp_server() -> FastMCP:
                                 AgentLink.a_agent_id == sender.id,
                                 AgentLink.status == "approved",
                                 func.lower(Agent.name) == lookup_value,
+                                cast(Any, Agent.is_active).is_(True),
                             )
                             .limit(1)
                         )
@@ -3459,6 +3577,7 @@ def build_mcp_server() -> FastMCP:
                                                     AgentLink.status == "approved",
                                                     Project.id == tproj.id,
                                                     func.lower(Agent.name) == lookup_value,
+                                                    cast(Any, Agent.is_active).is_(True),
                                                 )
                                                 .limit(1)
                                             )
@@ -6222,9 +6341,11 @@ def build_mcp_server() -> FastMCP:
         await ensure_schema()
 
         async with get_session() as session:
-            # Get all agents in the project
+            # Get all active agents in the project
             result = await session.execute(
-                select(Agent).where(Agent.project_id == project.id).order_by(desc(Agent.last_active_ts))
+                select(Agent)
+                .where(Agent.project_id == project.id, cast(Any, Agent.is_active).is_(True))
+                .order_by(desc(Agent.last_active_ts))
             )
             agents = result.scalars().all()
 
@@ -6578,7 +6699,7 @@ def build_mcp_server() -> FastMCP:
                 rows = await s_auto.execute(
                     select(Project)
                     .join(Agent, Agent.project_id == Project.id)
-                    .where(func.lower(Agent.name) == agent.lower())
+                    .where(func.lower(Agent.name) == agent.lower(), cast(Any, Agent.is_active).is_(True))
                     .limit(2)
                 )
                 projects = [row[0] for row in rows.all()]
@@ -6642,7 +6763,7 @@ def build_mcp_server() -> FastMCP:
                 rows = await s_auto.execute(
                     select(Project)
                     .join(Agent, Agent.project_id == Project.id)
-                    .where(func.lower(Agent.name) == agent.lower())
+                    .where(func.lower(Agent.name) == agent.lower(), cast(Any, Agent.is_active).is_(True))
                     .limit(2)
                 )
                 projects = [row[0] for row in rows.all()]
@@ -6704,7 +6825,7 @@ def build_mcp_server() -> FastMCP:
                 rows = await s_auto.execute(
                     select(Project)
                     .join(Agent, Agent.project_id == Project.id)
-                    .where(func.lower(Agent.name) == agent.lower())
+                    .where(func.lower(Agent.name) == agent.lower(), cast(Any, Agent.is_active).is_(True))
                     .limit(2)
                 )
                 projects = [row[0] for row in rows.all()]
@@ -6782,7 +6903,7 @@ def build_mcp_server() -> FastMCP:
                 rows = await s_auto.execute(
                     select(Project)
                     .join(Agent, Agent.project_id == Project.id)
-                    .where(func.lower(Agent.name) == agent.lower())
+                    .where(func.lower(Agent.name) == agent.lower(), cast(Any, Agent.is_active).is_(True))
                     .limit(2)
                 )
                 projects = [row[0] for row in rows.all()]
@@ -6865,7 +6986,7 @@ def build_mcp_server() -> FastMCP:
                 rows = await s_auto.execute(
                     select(Project)
                     .join(Agent, Agent.project_id == Project.id)
-                    .where(func.lower(Agent.name) == agent.lower())
+                    .where(func.lower(Agent.name) == agent.lower(), cast(Any, Agent.is_active).is_(True))
                     .limit(2)
                 )
                 projects = [row[0] for row in rows.all()]
@@ -6936,7 +7057,7 @@ def build_mcp_server() -> FastMCP:
                 rows = await s_auto.execute(
                     select(Project)
                     .join(Agent, Agent.project_id == Project.id)
-                    .where(func.lower(Agent.name) == agent.lower())
+                    .where(func.lower(Agent.name) == agent.lower(), cast(Any, Agent.is_active).is_(True))
                     .limit(2)
                 )
                 projects = [row[0] for row in rows.all()]
@@ -7002,7 +7123,7 @@ def build_mcp_server() -> FastMCP:
                 rows = await s_auto.execute(
                     select(Project)
                     .join(Agent, Agent.project_id == Project.id)
-                    .where(func.lower(Agent.name) == agent.lower())
+                    .where(func.lower(Agent.name) == agent.lower(), cast(Any, Agent.is_active).is_(True))
                     .limit(2)
                 )
                 projects = [row[0] for row in rows.all()]

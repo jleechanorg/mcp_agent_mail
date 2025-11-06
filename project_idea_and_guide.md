@@ -33,7 +33,7 @@ Core idea, constraints, and assumptions
     Messages are GFM markdown persisted in Git (per project), plus SQLite metadata with FTS5 for search; Git commits on each message/file_reservation update let us piggyback diffing, history, and blame.
     SQLite
 
-    Agents get ephemeral, memorable identities (e.g., GreenCastle) bound to program/model, inception time, project id, and task description. When you don't supply a custom name we auto-generate one from adjective/noun sets (swap in unique-names-generator or similar if you prefer).
+    Agents get ephemeral, memorable identities (e.g., GreenCastle) bound to program/model, inception time, project id, and task description. When you don't supply a custom name we auto-generate one from adjective/noun sets (swap in unique-names-generator or similar if you prefer). Reusing a name retires the previous identity automatically so there is never more than one active owner of a handle.
     PyPI
 
 Why MCP + FastMCP + Streamable HTTP

@@ -257,7 +257,7 @@ def _check_and_fix_duplicate_agent_names(connection) -> None:
 
     logger.warning(f"Found {len(duplicates)} agent name(s) used in multiple projects. Auto-renaming for global uniqueness...")
 
-    for name_lower, count in duplicates:
+    for name_lower, _count in duplicates:
         # Get all agents with this name
         cursor = connection.exec_driver_sql(
             """
@@ -302,6 +302,7 @@ def _check_and_fix_duplicate_agent_names(connection) -> None:
 
 
 def _setup_fts(connection) -> None:
+    _ensure_agent_active_columns(connection)
     connection.exec_driver_sql(
         "CREATE VIRTUAL TABLE IF NOT EXISTS fts_messages USING fts5(message_id UNINDEXED, subject, body)"
     )
@@ -356,11 +357,21 @@ def _setup_fts(connection) -> None:
     # This handles upgrading from per-project uniqueness to global uniqueness
     _check_and_fix_duplicate_agent_names(connection)
 
-    # Case-insensitive unique index on agent names for global uniqueness
-    # This prevents race conditions by enforcing uniqueness at the database level
-    # The check above ensures no duplicates exist, so this will succeed
+    # Case-insensitive unique index on ACTIVE agent names for global uniqueness
+    connection.exec_driver_sql("DROP INDEX IF EXISTS uq_agents_name_ci")
     connection.exec_driver_sql(
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_agents_name_ci ON agents(lower(name))"
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_agents_name_ci ON agents(lower(name)) WHERE is_active = 1"
     )
 
+
+def _ensure_agent_active_columns(connection) -> None:
+    columns = {
+        row[1]
+        for row in connection.exec_driver_sql("PRAGMA table_info('agents')").fetchall()
+    }
+    if "is_active" not in columns:
+        connection.exec_driver_sql("ALTER TABLE agents ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
+    if "deleted_ts" not in columns:
+        connection.exec_driver_sql("ALTER TABLE agents ADD COLUMN deleted_ts TEXT")
+    connection.exec_driver_sql("UPDATE agents SET is_active = 1 WHERE is_active IS NULL")
 
