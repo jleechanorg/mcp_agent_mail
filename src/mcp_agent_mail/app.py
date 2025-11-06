@@ -3837,7 +3837,12 @@ def build_mcp_server() -> FastMCP:
         external: dict[int, dict[str, Any]] = {}
 
         async with get_session() as sx:
-            existing = await sx.execute(select(Agent.name).where(Agent.project_id == project.id))
+            existing = await sx.execute(
+                select(Agent.name).where(
+                    Agent.project_id == project.id,
+                    cast(Any, Agent.is_active).is_(True),
+                )
+            )
             local_names = {row[0] for row in existing.fetchall()}
             unknown_local: set[str] = set()
             unknown_external: dict[str, list[str]] = defaultdict(list)
@@ -3897,6 +3902,7 @@ def build_mcp_server() -> FastMCP:
                                 AgentLink.status == "approved",
                                 Project.id == target_project_override.id,
                                 Agent.name == target_name_override,
+                                cast(Any, Agent.is_active).is_(True),
                             )
                             .limit(1)
                         )
@@ -3910,6 +3916,7 @@ def build_mcp_server() -> FastMCP:
                                 AgentLink.a_agent_id == sender.id,
                                 AgentLink.status == "approved",
                                 Agent.name == nm,
+                                cast(Any, Agent.is_active).is_(True),
                             )
                             .limit(1)
                         )
@@ -6286,7 +6293,12 @@ def build_mcp_server() -> FastMCP:
         project = await _get_project_by_identifier(slug)
         await ensure_schema()
         async with get_session() as session:
-            result = await session.execute(select(Agent).where(Agent.project_id == project.id))
+            result = await session.execute(
+                select(Agent).where(
+                    Agent.project_id == project.id,
+                    cast(Any, Agent.is_active).is_(True),
+                )
+            )
             agents = result.scalars().all()
         return {
             **_project_to_dict(project),
