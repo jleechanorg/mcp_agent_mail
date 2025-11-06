@@ -2822,6 +2822,7 @@ def build_mcp_server() -> FastMCP:
             except Exception:
                 pass
         sender = await _get_agent(project, sender_name)
+        settings_local = get_settings()
         # Split recipients into local vs external (approved links)
         local_to: list[str] = []
         local_cc: list[str] = []
@@ -3514,10 +3515,6 @@ def build_mcp_server() -> FastMCP:
                                 continue
                     if rec:
                         _link, target_project, target_agent = rec
-                        recipient_policy = (getattr(target_agent, "contact_policy", "auto") or "auto").lower()
-                        if recipient_policy == "block_all":
-                            await ctx.error("CONTACT_BLOCKED: Recipient is not accepting messages.")
-                            raise _ContactBlocked()
                         bucket = external.setdefault(target_project.id or 0, {"project": target_project, "to": [], "cc": [], "bcc": []})
                         bucket[kind].append(target_agent.name)
                     else:
