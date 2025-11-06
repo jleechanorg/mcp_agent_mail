@@ -180,7 +180,7 @@ Pitfalls to avoid
 - Dual persistence model:
   - Human-readable markdown in a per-project Git repo for every canonical message and per-recipient inbox/outbox copy
   - SQLite with FTS5 for fast search, directory queries, and file reservations/leases
-- "Directory/LDAP" style queries for agents; memorable adjective+noun names
+- "Directory/LDAP" style queries for agents; auto-generated adjective+noun codenames keep things memorable (custom alphanumeric names are also allowed)
 - Advisory file reservations for editing surfaces; optional pre-commit guard
 - Resource layer for convenient reads (e.g., `resource://inbox/{agent}`)
 
@@ -1265,7 +1265,7 @@ sequenceDiagram
 ### Semantics & invariants
 
 - Identity
-  - Names are memorable adjective+noun and unique per project; `name_hint` is sanitized (alnum) and used if available
+  - Names can be any sanitized alphanumeric string and are globally unique; if you omit `name` (or it conflicts), the server generates an adjective+noun codename, and any `name_hint` is sanitized (alnum) before use
   - `whois` returns the stored profile; `list_agents` can filter by recent activity
   - `last_active_ts` is bumped on relevant interactions (messages, inbox checks, etc.)
 - Threads
@@ -1577,7 +1577,7 @@ result = await client.call_tool("list_extended_tools", {})
 | `QUOTA_ATTACHMENTS_LIMIT_BYTES` | `0` | Max attachment storage per project (0=unlimited) |
 | `QUOTA_INBOX_LIMIT_COUNT` | `0` | Max inbox messages per agent (0=unlimited) |
 | `RETENTION_IGNORE_PROJECT_PATTERNS` | `demo,test*,testproj*,testproject,backendproj*,frontendproj*` | CSV of project patterns to ignore in retention/quota reports |
-| `AGENT_NAME_ENFORCEMENT_MODE` | `coerce` | Agent naming policy: `strict` (reject invalid adjective+noun names), `coerce` (auto-generate if invalid), `always_auto` (always auto-generate) |
+| `AGENT_NAME_ENFORCEMENT_MODE` | `coerce` | Agent naming policy: `strict` (reject invalid/taken sanitized names), `coerce` (auto-generate when invalid or taken), `always_auto` (always auto-generate) |
 | `MCP_TOOLS_MODE` | `core` | Tool exposure mode: `core` (10 essential tools + meta-tools for lazy loading ~10k tokens) or `extended` (all 29 tools exposed directly ~25k tokens). Core mode reduces initial context by exposing only essential coordination tools, with extended tools accessible via `call_extended_tool` meta-tool. |
 
 ## Development quick start
@@ -1706,8 +1706,8 @@ This section has been removed to keep the README focused. Client code samples be
 - Why advisory file reservations instead of global locks?
   - Agents coordinate asynchronously; hard locks create head-of-line blocking and brittle failures. Advisory reservations surface intent and conflicts while the optional pre-commit guard enforces locally where it matters.
 
-- Why are agent names adjective+noun?
-  - Memorable identities reduce confusion in inboxes, commit logs, and UI. The scheme yields low collision risk while staying human-friendly (vs GUIDs) and predictable for directory listings.
+- Why do auto-generated names look like adjective+noun combos?
+  - When you skip `name` (or it conflicts), the server falls back to a curated adjective/noun pool to create memorable codenames. You're still free to supply any sanitized alphanumeric name if you want a custom identity.
 
 - Why is `project_key` an absolute path?
   - Using the workspace's absolute path creates a stable, collision-resistant project identity across shells and agents. Slugs are derived deterministically from it, avoiding accidental forks of the same project.

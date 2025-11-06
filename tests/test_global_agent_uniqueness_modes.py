@@ -50,7 +50,7 @@ async def test_agent_names_coerce_mode_auto_generates_unique_names(isolated_env)
 
         # Should get a different auto-generated name, not "Alice"
         assert result2.data["name"] != "Alice"
-        # Should be a valid agent name (adjective+noun pattern)
+        # Should be a valid agent name (non-empty sanitized codename)
         assert len(result2.data["name"]) > 0
         print(f"Auto-generated name in coerce mode: {result2.data['name']}")
 

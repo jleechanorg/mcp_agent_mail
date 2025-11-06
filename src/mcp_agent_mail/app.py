@@ -2030,7 +2030,7 @@ CORE_TOOLS = {
     "mark_message_read",
 }
 
-# Extended tools (~16k tokens): Advanced features available via meta-tools  
+# Extended tools (~16k tokens): Advanced features available via meta-tools
 EXTENDED_TOOLS = {
     "create_agent_identity",
     "acknowledge_message",
@@ -2398,7 +2398,7 @@ def build_mcp_server() -> FastMCP:
         except TypeError as e:
             # Invalid arguments
             raise ValueError(
-                f"Invalid arguments for {tool_name}: {str(e)}"
+                f"Invalid arguments for {tool_name}: {e!s}"
             ) from e
 
     @mcp.tool(name="ensure_project")
@@ -2502,7 +2502,7 @@ def build_mcp_server() -> FastMCP:
 
         Semantics
         ---------
-        - If `name` is omitted, a random adjective+noun name is auto-generated (e.g., "BlueLake").
+        - If `name` is omitted, the server auto-generates a random codename (currently adjective+noun, e.g., "BlueLake").
         - Reusing the same `name` updates the profile (program/model/task) and
           refreshes `last_active_ts`.
         - A `profile.json` file is written under `agents/<Name>/` in the project archive.
@@ -2526,7 +2526,7 @@ def build_mcp_server() -> FastMCP:
             The underlying model (e.g., "gpt5-codex", "opus-4.1").
         name : Optional[str]
             Any alphanumeric string for the agent name (e.g., "BlueLake", "streamf", "agent1").
-            If omitted, a random adjective+noun name is auto-generated.
+            If omitted, the server auto-generates a random codename (currently adjective+noun).
             Names are globally unique; passing the same name updates the profile.
         task_description : str
             Short description of current focus (shows up in directory listings).
@@ -2663,7 +2663,7 @@ def build_mcp_server() -> FastMCP:
         --------------------------------------
         - Always creates a new identity with a fresh unique name (never updates an existing one).
         - `name_hint`, if provided, must be alphanumeric and globally available,
-          otherwise an error is raised. Without a hint, a random adjective+noun name is generated.
+          otherwise an error is raised. Without a hint, the server auto-generates a random codename (currently adjective+noun).
 
         CRITICAL: Agent Naming Rules
         -----------------------------
