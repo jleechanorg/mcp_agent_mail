@@ -1254,6 +1254,183 @@ async def _get_agent(project: Project, name: str) -> Agent:
         return agent
 
 
+async def _rename_agent(
+    project: Project,
+    old_name: str,
+    new_name: str,
+    settings: Settings,
+) -> Agent:
+    """
+    Rename an agent and update archive.
+
+    - Validates old agent exists
+    - Checks new name is available
+    - Updates database
+    - Moves archive directory
+    - Writes new profile
+    - Commits to Git
+    """
+    if project.id is None:
+        raise ValueError("Project must have an id before renaming agents.")
+
+    # Get the existing agent
+    agent = await _get_agent(project, old_name)
+
+    # Sanitize new name
+    sanitized_new_name = sanitize_agent_name(new_name)
+    if not sanitized_new_name:
+        raise ValueError(f"New agent name '{new_name}' must contain alphanumeric characters.")
+
+    # Check if new name is already taken (case-insensitive)
+    if old_name.lower() == sanitized_new_name.lower():
+        raise ValueError(f"New name '{sanitized_new_name}' is the same as current name '{old_name}'.")
+
+    if await _agent_name_exists(project, sanitized_new_name):
+        raise ValueError(f"Agent name '{sanitized_new_name}' is already in use.")
+
+    # Update database
+    await ensure_schema()
+    async with get_session() as session:
+        db_agent = await session.get(Agent, agent.id)
+        if not db_agent:
+            raise NoResultFound(f"Agent with id {agent.id} not found in database.")
+        db_agent.name = sanitized_new_name
+        db_agent.last_active_ts = datetime.now(timezone.utc)
+        session.add(db_agent)
+        await session.commit()
+        await session.refresh(db_agent)
+        agent = db_agent
+
+    # Update archive
+    archive = await ensure_archive(settings, project.slug)
+    async with _archive_write_lock(archive):
+        from .storage import _commit
+        from .storage import _write_json  # Private but needed for manual profile write
+        import shutil
+
+        old_agent_dir = archive.root / "agents" / old_name
+        new_agent_dir = archive.root / "agents" / sanitized_new_name
+        repo = archive.repo
+
+        # Move the directory if it exists
+        if old_agent_dir.exists():
+            await asyncio.to_thread(shutil.move, str(old_agent_dir), str(new_agent_dir))
+
+        # Write the new profile JSON file
+        profile_path = new_agent_dir / "profile.json"
+        await _write_json(profile_path, _agent_to_dict(agent))
+
+        # Git operations: remove old directory from index
+        def _remove_old():
+            try:
+                repo.index.remove([f"agents/{old_name}"], r=True, ignore_unmatch=True)
+            except Exception:
+                pass
+
+        await asyncio.to_thread(_remove_old)
+
+        # Commit the rename with new profile path (will be added by _commit)
+        rel_path = profile_path.relative_to(archive.repo_root).as_posix()
+        await _commit(
+            repo,
+            archive.settings,
+            f"agent: rename {old_name} → {sanitized_new_name}",
+            [rel_path],
+        )
+
+    return agent
+
+
+async def _delete_agent(
+    project: Project,
+    agent_name: str,
+    settings: Settings,
+) -> dict[str, Any]:
+    """
+    Delete an agent and move to trash in archive.
+
+    - Validates agent exists
+    - Checks for active file reservations
+    - Deletes from database
+    - Moves archive to trash
+    - Commits to Git
+    """
+    if project.id is None:
+        raise ValueError("Project must have an id before deleting agents.")
+
+    # Get the agent
+    agent = await _get_agent(project, agent_name)
+
+    # Check for active file reservations
+    await ensure_schema()
+    async with get_session() as session:
+        result = await session.execute(
+            select(FileReservation).where(
+                FileReservation.project_id == project.id,
+                FileReservation.agent_id == agent.id,
+                FileReservation.expires_ts > datetime.now(timezone.utc),
+            )
+        )
+        active_reservations = result.scalars().all()
+
+        if active_reservations:
+            raise ValueError(
+                f"Cannot delete agent '{agent_name}' with {len(active_reservations)} active file reservation(s). "
+                "Release or wait for reservations to expire first."
+            )
+
+    # Store agent info before deletion
+    agent_dict = _agent_to_dict(agent)
+
+    # Delete from database
+    async with get_session() as session:
+        db_agent = await session.get(Agent, agent.id)
+        if db_agent:
+            await session.delete(db_agent)
+            await session.commit()
+
+    # Move archive to trash
+    archive = await ensure_archive(settings, project.slug)
+    async with _archive_write_lock(archive):
+        agent_dir = archive.root / "agents" / agent_name
+        trash_dir = archive.root / "agents" / ".trash" / agent_name
+
+        if agent_dir.exists():
+            import shutil
+            # Ensure trash directory exists
+            await asyncio.to_thread(trash_dir.parent.mkdir, parents=True, exist_ok=True)
+
+            # Move to trash
+            await asyncio.to_thread(shutil.move, str(agent_dir), str(trash_dir))
+
+            # Commit the deletion
+            from .storage import _commit
+            repo = archive.repo
+
+            # Remove from Git
+            def _remove():
+                repo.index.remove([f"agents/{agent_name}"], r=True, ignore_unmatch=True)
+                # Add trash directory
+                trash_rel = f"agents/.trash/{agent_name}"
+                repo.index.add([trash_rel])
+
+            await asyncio.to_thread(_remove)
+
+            # Commit
+            await _commit(
+                repo,
+                archive.settings,
+                f"agent: delete {agent_name}",
+                [f"agents/.trash/{agent_name}"],
+            )
+
+    return {
+        "deleted": True,
+        "agent": agent_dict,
+        "message": f"Agent '{agent_name}' has been deleted and moved to trash.",
+    }
+
+
 async def _create_message(
     project: Project,
     sender: Agent,
@@ -1958,9 +2135,11 @@ CORE_TOOLS = {
     "mark_message_read",
 }
 
-# Extended tools (~16k tokens): Advanced features available via meta-tools  
+# Extended tools (~16k tokens): Advanced features available via meta-tools
 EXTENDED_TOOLS = {
     "create_agent_identity",
+    "rename_agent",
+    "delete_agent",
     "acknowledge_message",
     "search_messages",
     "request_contact",
@@ -1986,6 +2165,8 @@ EXTENDED_TOOL_METADATA = {
     "acknowledge_message": {"category": "messaging", "description": "Acknowledge a message (sets both read_ts and ack_ts)"},
     "search_messages": {"category": "search", "description": "Full-text search over subject and body"},
     "create_agent_identity": {"category": "identity", "description": "Create a new unique agent identity"},
+    "rename_agent": {"category": "identity", "description": "Rename an existing agent identity"},
+    "delete_agent": {"category": "identity", "description": "Delete an agent and move to trash"},
     "request_contact": {"category": "contact", "description": "Request contact approval to message another agent"},
     "respond_contact": {"category": "contact", "description": "Approve or deny a contact request"},
     "list_contacts": {"category": "contact", "description": "List contact links for an agent"},
@@ -2644,6 +2825,175 @@ def build_mcp_server() -> FastMCP:
             await write_agent_profile(archive, _agent_to_dict(agent))
         await ctx.info(f"Created new agent identity '{agent.name}' for project '{project.human_key}'.")
         return _agent_to_dict(agent)
+
+    @mcp.tool(name="rename_agent")
+    @_instrument_tool(
+        "rename_agent",
+        cluster=CLUSTER_IDENTITY,
+        capabilities={"identity", "configure"},
+        project_arg="project_key",
+        agent_arg="current_name",
+    )
+    async def rename_agent(
+        ctx: Context,
+        project_key: str,
+        current_name: str,
+        new_name: str,
+    ) -> dict[str, Any]:
+        """
+        Rename an existing agent and update its profile in the archive.
+
+        When to use
+        -----------
+        - When you need to change an agent's identity name to a better adjective+noun combination
+        - When consolidating or reorganizing agent identities
+
+        What this does
+        --------------
+        - Validates the current agent exists
+        - Checks that the new name is available (case-insensitive)
+        - Updates the agent name in the database
+        - Moves the agent's archive directory from agents/{old_name} to agents/{new_name}
+        - Writes the updated profile to Git
+        - Commits the rename operation to the archive
+
+        CRITICAL: Agent Naming Rules
+        -----------------------------
+        - New agent names MUST follow the adjective+noun format
+        - Examples: "GreenLake", "BlueDog", "RedStone", "PurpleBear"
+        - Names are case-insensitive unique per project
+        - INVALID examples: "BackendHarmonizer", "DatabaseMigrator", "UIRefactorer"
+
+        Parameters
+        ----------
+        project_key : str
+            Project slug or human key (same as passed to ensure_project)
+        current_name : str
+            The agent's current name (case-insensitive)
+        new_name : str
+            The new name (will be sanitized to adjective+noun format)
+
+        Returns
+        -------
+        dict
+            Updated agent profile: { id, name, program, model, task_description, inception_ts, last_active_ts, project_id }
+
+        Examples
+        --------
+        ```json
+        {
+          "jsonrpc": "2.0",
+          "id": "5",
+          "method": "tools/call",
+          "params": {
+            "name": "rename_agent",
+            "arguments": {
+              "project_key": "/data/projects/backend",
+              "current_name": "BlueLake",
+              "new_name": "GreenMountain"
+            }
+          }
+        }
+        ```
+
+        Errors
+        ------
+        - Raises error if current agent doesn't exist
+        - Raises error if new name is already taken
+        - Raises error if new name doesn't match adjective+noun format
+        """
+        project = await _get_project_by_identifier(project_key)
+        await ctx.info(f"Renaming agent '{current_name}' to '{new_name}' in project '{project.human_key}'.")
+        agent = await _rename_agent(project, current_name, new_name, settings)
+        await ctx.info(f"Successfully renamed agent to '{agent.name}'.")
+        return _agent_to_dict(agent)
+
+    @mcp.tool(name="delete_agent")
+    @_instrument_tool(
+        "delete_agent",
+        cluster=CLUSTER_IDENTITY,
+        capabilities={"identity", "configure"},
+        project_arg="project_key",
+        agent_arg="agent_name",
+    )
+    async def delete_agent(
+        ctx: Context,
+        project_key: str,
+        agent_name: str,
+    ) -> dict[str, Any]:
+        """
+        Delete an agent and move its archive to trash.
+
+        When to use
+        -----------
+        - When an agent identity is no longer needed
+        - When cleaning up temporary or worker agents
+        - When decommissioning stale agent identities
+
+        What this does
+        --------------
+        - Validates the agent exists
+        - Checks for active file reservations (will fail if any exist)
+        - Removes the agent from the database
+        - Moves the agent's archive directory to agents/.trash/{name}
+        - Commits the deletion to Git
+
+        IMPORTANT: Pre-deletion checks
+        -------------------------------
+        - The agent must not have any active file reservations
+        - Release all file reservations before deleting the agent
+        - Or wait for file reservations to expire naturally
+
+        Parameters
+        ----------
+        project_key : str
+            Project slug or human key (same as passed to ensure_project)
+        agent_name : str
+            The name of the agent to delete (case-insensitive)
+
+        Returns
+        -------
+        dict
+            {
+              "deleted": True,
+              "agent": { ... original agent profile ... },
+              "message": "Agent '{name}' has been deleted and moved to trash."
+            }
+
+        Examples
+        --------
+        ```json
+        {
+          "jsonrpc": "2.0",
+          "id": "6",
+          "method": "tools/call",
+          "params": {
+            "name": "delete_agent",
+            "arguments": {
+              "project_key": "/data/projects/backend",
+              "agent_name": "OldWorkerAgent"
+            }
+          }
+        }
+        ```
+
+        Errors
+        ------
+        - Raises error if agent doesn't exist
+        - Raises error if agent has active file reservations
+        - Raises error if project doesn't exist
+
+        Recovery
+        --------
+        - Deleted agents are moved to agents/.trash/ in the archive
+        - Archive can be manually restored from .trash if needed
+        - Database deletion is permanent (use with caution)
+        """
+        project = await _get_project_by_identifier(project_key)
+        await ctx.info(f"Deleting agent '{agent_name}' from project '{project.human_key}'.")
+        result = await _delete_agent(project, agent_name, settings)
+        await ctx.info(result["message"])
+        return result
 
     @mcp.tool(name="send_message")
     @_instrument_tool(
