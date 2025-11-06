@@ -147,7 +147,7 @@ class TestRenameAgent:
 
         from mcp_agent_mail.app import _rename_agent
 
-        renamed_agent = await _rename_agent(project, "BlueLake", "GreenCastle", settings)
+        _renamed_agent = await _rename_agent(project, "BlueLake", "GreenCastle", settings)
 
         # New directory should be created
         new_dir = archive.root / "agents" / "GreenCastle"
