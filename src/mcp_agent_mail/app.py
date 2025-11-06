@@ -40,6 +40,7 @@ from .storage import (
     ensure_archive,
     heal_archive_locks,
     process_attachments,
+    write_agent_deletion_marker,
     write_agent_profile,
     write_file_reservation_record,
     write_message_bundle,
@@ -1231,6 +1232,93 @@ async def _get_or_create_agent(
     async with _archive_write_lock(archive):
         await write_agent_profile(archive, _agent_to_dict(agent))
     return agent
+
+
+async def _delete_agent(project: Project, name: str, settings: Settings) -> dict[str, Any]:
+    """Delete an agent and all related records from the database.
+
+    This function:
+    1. Deletes the agent from the agents table
+    2. Deletes associated MessageRecipient records
+    3. Deletes messages sent by the agent
+    4. Deletes file reservations held by the agent
+    5. Deletes agent links involving the agent
+    6. Writes a deletion marker to the Git archive
+
+    Returns a dict with deletion statistics.
+    """
+    if project.id is None:
+        raise ValueError("Project must have an id before deleting agents.")
+
+    await ensure_schema()
+
+    # First, get the agent to ensure it exists
+    agent = await _get_agent(project, name)
+    if agent.id is None:
+        raise ValueError("Agent must have an id before deletion.")
+
+    agent_id = agent.id
+    agent_name = agent.name
+
+    stats = {
+        "agent_id": agent_id,
+        "agent_name": agent_name,
+        "project": project.human_key,
+        "message_recipients_deleted": 0,
+        "messages_deleted": 0,
+        "file_reservations_deleted": 0,
+        "agent_links_deleted": 0,
+    }
+
+    async with get_session() as session:
+        # Delete MessageRecipient records
+        result = await session.execute(
+            select(MessageRecipient).where(MessageRecipient.agent_id == agent_id)
+        )
+        recipients = result.scalars().all()
+        for recipient in recipients:
+            await session.delete(recipient)
+        stats["message_recipients_deleted"] = len(recipients)
+
+        # Delete messages sent by the agent
+        result = await session.execute(
+            select(Message).where(Message.sender_id == agent_id)
+        )
+        messages = result.scalars().all()
+        for message in messages:
+            await session.delete(message)
+        stats["messages_deleted"] = len(messages)
+
+        # Delete file reservations
+        result = await session.execute(
+            select(FileReservation).where(FileReservation.agent_id == agent_id)
+        )
+        reservations = result.scalars().all()
+        for reservation in reservations:
+            await session.delete(reservation)
+        stats["file_reservations_deleted"] = len(reservations)
+
+        # Delete agent links (both as source and target)
+        result = await session.execute(
+            select(AgentLink).where(
+                or_(AgentLink.a_agent_id == agent_id, AgentLink.b_agent_id == agent_id)
+            )
+        )
+        links = result.scalars().all()
+        for link in links:
+            await session.delete(link)
+        stats["agent_links_deleted"] = len(links)
+
+        # Finally, delete the agent
+        await session.delete(agent)
+        await session.commit()
+
+    # Write deletion marker to Git archive
+    archive = await ensure_archive(settings, project.slug)
+    async with archive_write_lock(archive):
+        await write_agent_deletion_marker(archive, agent_name, stats)
+
+    return stats
 
 
 async def _ensure_cross_project_link(
@@ -2593,6 +2681,75 @@ def build_mcp_server() -> FastMCP:
                     agent = db_agent
         await ctx.info(f"Registered agent '{agent.name}' for project '{project.human_key}'.")
         return _agent_to_dict(agent)
+
+    @mcp.tool(name="delete_agent")
+    @_instrument_tool("delete_agent", cluster=CLUSTER_IDENTITY, capabilities={"identity"}, agent_arg="name", project_arg="project_key")
+    async def delete_agent(
+        ctx: Context,
+        project_key: str,
+        name: str,
+    ) -> dict[str, Any]:
+        """
+        Delete an agent and all associated data from the system.
+
+        When to use
+        -----------
+        - When an agent is no longer needed and should be permanently removed.
+        - To clean up test agents or obsolete agent identities.
+
+        Semantics
+        ---------
+        - Deletes the agent from the database
+        - Deletes all messages sent by the agent
+        - Deletes all message recipient records for the agent
+        - Deletes all file reservations held by the agent
+        - Deletes all agent links (contacts) involving the agent
+        - Writes a deletion marker to the Git archive at agents/<Name>/deleted.json
+
+        WARNING
+        -------
+        This operation is DESTRUCTIVE and IRREVERSIBLE. All messages, reservations,
+        and links associated with this agent will be permanently deleted from the database.
+        A deletion marker will be preserved in the Git archive for audit purposes.
+
+        Parameters
+        ----------
+        project_key : str
+            Any string identifier for the project containing the agent.
+        name : str
+            The exact name of the agent to delete (case-insensitive).
+
+        Returns
+        -------
+        dict
+            Deletion statistics including:
+            - agent_id: The ID of the deleted agent
+            - agent_name: The name of the deleted agent
+            - project: The project human_key
+            - message_recipients_deleted: Number of recipient records deleted
+            - messages_deleted: Number of messages deleted
+            - file_reservations_deleted: Number of file reservations deleted
+            - agent_links_deleted: Number of agent links deleted
+
+        Examples
+        --------
+        Delete an agent:
+        ```json
+        {"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"delete_agent","arguments":{
+          "project_key":"/data/projects/backend","name":"BlueLake"
+        }}}
+        ```
+
+        Pitfalls
+        --------
+        - This operation cannot be undone. The agent and all associated data will be permanently deleted.
+        - If the agent doesn't exist, a NoResultFound error will be raised.
+        - Other agents' messages TO this agent will have their recipient records deleted but the messages themselves remain.
+        """
+        project = await _ensure_project(project_key)
+        stats = await _delete_agent(project, name, settings)
+        await ctx.info(f"Deleted agent '{name}' from project '{project.human_key}'.")
+        return stats
 
     @mcp.tool(name="whois")
     @_instrument_tool("whois", cluster=CLUSTER_IDENTITY, capabilities={"identity", "audit"}, project_arg="project_key", agent_arg="agent_name")

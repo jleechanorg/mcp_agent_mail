@@ -340,6 +340,19 @@ async def write_agent_profile(archive: ProjectArchive, agent: dict[str, object])
     await _commit(archive.repo, archive.settings, f"agent: profile {agent['name']}", [rel])
 
 
+async def write_agent_deletion_marker(archive: ProjectArchive, agent_name: str, deletion_stats: dict[str, object]) -> None:
+    """Write a deletion marker to the Git archive for an agent."""
+    deletion_marker = {
+        "name": agent_name,
+        "deleted_at": datetime.now(timezone.utc).isoformat(),
+        "deletion_stats": deletion_stats,
+    }
+    marker_path = archive.root / "agents" / agent_name / "deleted.json"
+    await _write_json(marker_path, deletion_marker)
+    rel = marker_path.relative_to(archive.repo_root).as_posix()
+    await _commit(archive.repo, archive.settings, f"agent: delete {agent_name}", [rel])
+
+
 async def write_file_reservation_record(archive: ProjectArchive, file_reservation: dict[str, object]) -> None:
     path_pattern = str(file_reservation.get("path_pattern") or file_reservation.get("path") or "").strip()
     if not path_pattern:
