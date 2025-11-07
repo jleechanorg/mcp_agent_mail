@@ -602,7 +602,7 @@ def _agent_to_dict(agent: Agent) -> dict[str, Any]:
         "project_id": agent.project_id,
         "attachments_policy": getattr(agent, "attachments_policy", "auto"),
         "is_active": getattr(agent, "is_active", True),
-        "deleted_ts": _iso(getattr(agent, "deleted_ts", None)),
+        "deleted_ts": _iso(deleted_ts) if (deleted_ts := getattr(agent, "deleted_ts", None)) is not None else None,
     }
 
 
@@ -1221,7 +1221,6 @@ async def _get_or_create_agent(
             select(Agent).where(
                 Agent.project_id == project.id,
                 func.lower(Agent.name) == desired_name.lower(),
-                cast(Any, Agent.is_active).is_(True),
             )
         )
         agent = result.scalars().first()
@@ -1230,8 +1229,10 @@ async def _get_or_create_agent(
             agent.model = model
             agent.task_description = task_description
             agent.last_active_ts = datetime.now(timezone.utc)
-            agent.is_active = True
-            agent.deleted_ts = None
+            # Reactivate if previously retired
+            if not getattr(agent, "is_active", True):
+                agent.is_active = True
+                agent.deleted_ts = None
             session.add(agent)
             try:
                 await session.commit()
@@ -2103,16 +2104,21 @@ async def _get_message(project: Project, message_id: int) -> Message:
 
 
 async def _get_agent_by_id(project: Project, agent_id: int) -> Agent:
+    """Fetch active agent by ID within project."""
     if project.id is None:
         raise ValueError("Project must have an id before querying agents.")
     await ensure_schema()
     async with get_session() as session:
         result = await session.execute(
-            select(Agent).where(Agent.project_id == project.id, Agent.id == agent_id)
+            select(Agent).where(
+                Agent.project_id == project.id,
+                Agent.id == agent_id,
+                cast(Any, Agent.is_active).is_(True),
+            )
         )
         agent = result.scalars().first()
         if not agent:
-            raise NoResultFound(f"Agent id '{agent_id}' not found for project '{project.human_key}'.")
+            raise NoResultFound(f"Agent id '{agent_id}' not found (or inactive) for project '{project.human_key}'.")
         return agent
 
 

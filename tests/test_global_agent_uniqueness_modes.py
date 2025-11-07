@@ -42,7 +42,7 @@ async def test_agent_names_coerce_mode_auto_generates_unique_names(isolated_env)
         assert result1.data["name"] == "Alice"
 
         # Try to create another agent "Alice" in project2
-        # In coerce mode, this should succeed but with an auto-generated unique name
+        # In coerce mode (default), this retires the project1 agent and reuses the name
         result2 = await client.call_tool(
             "register_agent",
             arguments={
@@ -53,11 +53,26 @@ async def test_agent_names_coerce_mode_auto_generates_unique_names(isolated_env)
             },
         )
 
-        # Should get a different auto-generated name, not "Alice"
-        assert result2.data["name"] != "Alice"
-        # Should be a valid agent name (non-empty sanitized codename)
-        assert len(result2.data["name"]) > 0
-        print(f"Auto-generated name in coerce mode: {result2.data['name']}")
+        # Should reuse the same name "Alice" (after retiring the project1 agent)
+        assert result2.data["name"] == "Alice"
+        assert result2.data["project_id"] != result1.data["project_id"]
+        
+        # Verify that the old agent was retired
+        async with get_session() as session:
+            proj1 = (await session.execute(
+                select(Project).where(Project.human_key == "/tmp/project1")
+            )).scalars().first()
+            assert proj1 is not None
+            
+            retired_agents = (await session.execute(
+                select(Agent).where(
+                    Agent.project_id == proj1.id,
+                    func.lower(Agent.name) == "alice",
+                )
+            )).scalars().all()
+            assert len(retired_agents) == 1
+            assert retired_agents[0].is_active is False
+            assert retired_agents[0].deleted_ts is not None
 
 
 @pytest.mark.asyncio

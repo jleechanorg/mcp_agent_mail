@@ -56,7 +56,7 @@
 
 ## Upstream Repository Check (Dicklesworthstone/mcp_agent_mail)
 
-Command: `uv run pytest` in a fresh clone of https://github.com/Dicklesworthstone/mcp_agent_mail.git (commit 8bde565 as of 2025‑11‑06).
+Command: `uv run pytest` in a fresh clone of <https://github.com/Dicklesworthstone/mcp_agent_mail.git> (commit 8bde565 as of 2025‑11‑06).
 
 - Suite still fails (timeout after ~200 s) even before applying any of our changes.
 - Representative failures:
