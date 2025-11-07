@@ -2331,9 +2331,10 @@ def build_mcp_server() -> FastMCP:
         cc_names = _unique(cc_names)
         bcc_names = _unique(bcc_names)
         if to_names or cc_names or bcc_names:
-            to_agents = [await _get_agent(project, name) for name in to_names]
-            cc_agents = [await _get_agent(project, name) for name in cc_names]
-            bcc_agents = [await _get_agent(project, name) for name in bcc_names]
+            # Use global agent lookup since agent names are globally unique
+            to_agents = [await _get_agent_by_name(name) for name in to_names]
+            cc_agents = [await _get_agent_by_name(name) for name in cc_names]
+            bcc_agents = [await _get_agent_by_name(name) for name in bcc_names]
         else:
             to_agents = []
             cc_agents = []
@@ -3215,12 +3216,14 @@ def build_mcp_server() -> FastMCP:
             if unknown:
                 # Auto-register missing recipients if enabled
                 if getattr(settings_local, "messaging_auto_register_recipients", True):
+                    # Get sender's project for auto-registration
+                    sender_project = await _get_project_by_id(sender.project_id)
                     # Best effort: try to register any unknown recipients with sane defaults
                     newly_registered: set[str] = set()
                     for missing in list(unknown):
                         try:
                             _ = await _get_or_create_agent(
-                                project,
+                                sender_project,
                                 missing,
                                 sender.program,
                                 sender.model,
