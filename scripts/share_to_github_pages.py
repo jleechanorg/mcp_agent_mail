@@ -923,8 +923,6 @@ def main() -> None:
                 key_path = Prompt.ask("Path to existing signing key")
                 signing_key = Path(key_path).expanduser().resolve()
     else:
-        if saved_config is None:
-            raise RuntimeError("Expected saved configuration when reusing previous settings.")
         use_signing = saved_config.get("use_signing", True)
         generate_new_key = saved_config.get("generate_new_key", True)
         if use_signing:
