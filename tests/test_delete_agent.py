@@ -1,5 +1,7 @@
 """Tests for delete_agent functionality."""
 
+from datetime import datetime, timezone, timedelta
+
 import pytest
 from sqlmodel import select
 from mcp_agent_mail.app import _delete_agent, _get_agent
@@ -91,7 +93,8 @@ async def setup_test_data():
             file_res = FileReservation(
                 agent_id=agent_a.id,
                 project_id=project.id,
-                file_path="test/file.txt",
+                path_pattern="test/file.txt",
+                expires_ts=datetime.now(timezone.utc) + timedelta(days=1),
             )
             session.add(file_res)
 
