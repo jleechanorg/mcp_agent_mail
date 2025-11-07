@@ -4,6 +4,20 @@
 
 > "It's like gmail for your coding agents!"
 
+## Fork Improvements
+
+This fork extends the [original MCP Agent Mail](https://github.com/Dicklesworthstone/mcp_agent_mail) with several production-ready enhancements:
+
+- **🚀 Lazy Loading System (Phase 2)** - Reduces token usage by ~65% with core mode (10 essential tools vs. 27), plus meta-tools (`list_extended_tools`, `call_extended_tool`) for dynamic tool discovery and invocation
+- **🎯 Globally Unique Agent Names** - Prevents agent name confusion across projects with database-enforced uniqueness, flexible coerce/strict enforcement modes, and automatic migration for existing deployments
+- **⚡ Simplified Registration** - `register_agent` now auto-creates projects, eliminating the need for separate `ensure_project` calls in most workflows
+- **🔧 Flexible Project Keys** - Supports any string identifier (repo names, custom IDs) as project keys, not just absolute paths
+- **💬 Contact-Free Messaging** - Direct agent-to-agent messaging without contact request approval, streamlining multi-agent coordination
+
+These improvements make the system more efficient, flexible, and easier to use in production multi-agent workflows.
+
+---
+
 A mail-like coordination layer for coding agents, exposed as an HTTP-only FastMCP server. It gives agents memorable identities, an inbox/outbox, searchable message history, and voluntary file reservation "leases" to avoid stepping on each other.
 
 Think of it as asynchronous email + directory + change-intent signaling for your agents, backed by Git (for human-auditable artifacts) and SQLite (for indexing and queries).
