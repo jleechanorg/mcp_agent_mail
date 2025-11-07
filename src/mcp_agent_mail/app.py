@@ -1380,7 +1380,6 @@ async def _delete_agent(
     agent_dict = _agent_to_dict(agent)
 
     # Check for foreign key references and active reservations
-    await ensure_schema()
     async with get_session() as session:
         # Check for sent messages
         sent_count = (await session.execute(
