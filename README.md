@@ -23,13 +23,13 @@ These improvements make the system more efficient, flexible, and easier to use i
 Install from PyPI:
 
 ```bash
-pip install mcp-agent-mail
+pip install ai-universe-mail
 ```
 
 Or with uv:
 
 ```bash
-uv pip install mcp-agent-mail
+uv pip install ai-universe-mail
 ```
 
 ---

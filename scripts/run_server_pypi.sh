@@ -4,10 +4,10 @@ set -euo pipefail
 # This script runs the MCP Agent Mail server using the PyPI package
 # instead of local development code
 
-echo "🔄 Installing mcp-agent-mail from PyPI..."
+echo "🔄 Installing ai-universe-mail from PyPI..."
 
 # Create a temporary directory for the isolated installation
-TEMP_ENV=$(mktemp -d -t mcp-agent-mail-XXXXXX)
+TEMP_ENV=$(mktemp -d -t ai-universe-mail-XXXXXX)
 trap "rm -rf $TEMP_ENV" EXIT
 
 # Find Python 3.11+
@@ -31,9 +31,9 @@ cd "$TEMP_ENV"
 uv venv --python "$PYTHON_BIN"
 source .venv/bin/activate
 
-uv pip install mcp-agent-mail
+uv pip install ai-universe-mail
 
-echo "✅ Installed mcp-agent-mail from PyPI"
+echo "✅ Installed ai-universe-mail from PyPI"
 
 # Load token from environment or .env file
 if [[ -z "${HTTP_BEARER_TOKEN:-}" ]]; then
@@ -51,5 +51,5 @@ fi
 
 export HTTP_BEARER_TOKEN
 
-echo "🚀 Starting MCP Agent Mail server from PyPI package..."
+echo "🚀 Starting AI Universe Mail server from PyPI package..."
 python -m mcp_agent_mail.cli serve-http "$@"

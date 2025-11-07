@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mcp-agent-mail"
+name = "ai-universe-mail"
 version = "0.1.0"
 description = "Coordinated multi-agent messaging and coordination MCP server."
 readme = "README.md"
