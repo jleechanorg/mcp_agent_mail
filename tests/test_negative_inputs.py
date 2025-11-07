@@ -11,10 +11,12 @@ from mcp_agent_mail.app import build_mcp_server
 async def test_invalid_project_or_agent_errors(isolated_env):
     server = build_mcp_server()
     async with Client(server) as client:
-        # Missing project — use non-raising MCP call to inspect error payload
+        # register_agent now auto-creates projects, so this should succeed
         res = await client.call_tool_mcp("register_agent", {"project_key": "Missing", "program": "x", "model": "y", "name": "A"})
-        assert res.isError is True
-        # Now create project and try sending from unknown agent
+        assert res.isError is False  # Changed: project is auto-created
+        assert res.content[0].text  # Should have success response
+
+        # Now create another project and try sending from unknown agent
         await client.call_tool("ensure_project", {"human_key": "/backend"})
         res2 = await client.call_tool_mcp(
             "send_message",
