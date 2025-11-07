@@ -18,6 +18,22 @@ These improvements make the system more efficient, flexible, and easier to use i
 
 ---
 
+## Installation
+
+Install from PyPI:
+
+```bash
+pip install mcp-agent-mail
+```
+
+Or with uv:
+
+```bash
+uv pip install mcp-agent-mail
+```
+
+---
+
 A mail-like coordination layer for coding agents, exposed as an HTTP-only FastMCP server. It gives agents memorable identities, an inbox/outbox, searchable message history, and voluntary file reservation "leases" to avoid stepping on each other.
 
 Think of it as asynchronous email + directory + change-intent signaling for your agents, backed by Git (for human-auditable artifacts) and SQLite (for indexing and queries).

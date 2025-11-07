@@ -1,10 +1,26 @@
 # Claude Code Agent Notes
 
-Claude Code (or Claude Desktop) must assume the MCP Agent Mail server is already running in the background before it connects. Always start/refresh the server with a background `bash -lc` call so you capture the PID and tee logs to a safe location:
+Claude Code (or Claude Desktop) must assume the MCP Agent Mail server is already running in the background before it connects. Always start/refresh the server with a background `bash -lc` call so you capture the PID and tee logs to a safe location.
+
+## Running from PyPI Package (Recommended)
+
+Use the published PyPI package for production use:
+
+```bash
+bash -lc "cd /Users/jleechan/mcp_agent_mail && ./scripts/run_server_pypi.sh >/tmp/mcp_agent_mail_server.log 2>&1 & echo \$!"
+```
+
+This installs `mcp-agent-mail` from PyPI in an isolated environment and runs the server.
+
+## Running from Local Source (Development)
+
+For development with local code changes:
 
 ```bash
 bash -lc "cd /Users/jleechan/mcp_agent_mail && ./scripts/run_server_with_token.sh >/tmp/mcp_agent_mail_server.log 2>&1 & echo \$!"
 ```
+
+## General Notes
 
 - Keep the printed PID handy; stop the service with `kill <PID>` when you are done.
 - Tail `/tmp/mcp_agent_mail_server.log` if Claude reports connection errors.
