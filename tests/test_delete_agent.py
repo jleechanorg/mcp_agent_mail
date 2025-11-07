@@ -4,7 +4,8 @@ from datetime import datetime, timezone, timedelta
 
 import pytest
 from sqlmodel import select
-from mcp_agent_mail.app import _delete_agent, _get_agent
+from mcp_agent_mail.app import _delete_agent
+from mcp_agent_mail.config import get_settings
 from mcp_agent_mail.models import (
     Agent,
     Message,
@@ -133,7 +134,8 @@ async def test_delete_agent_cascades_correctly(setup_test_data):
         assert len(result.scalars().all()) == 3
 
     # Delete agent_a
-    stats = await _delete_agent(project, "agent_a")
+    settings = get_settings()
+    stats = await _delete_agent(project, "agent_a", settings)
 
     # Verify deletion stats
     assert stats["agent_id"] == agent_a_id
@@ -233,7 +235,8 @@ async def test_delete_agent_no_orphaned_recipients():
             msg_id = msg.id
 
     # Delete agent_x (the sender)
-    await _delete_agent(project, "agent_x")
+    settings = get_settings()
+    await _delete_agent(project, "agent_x", settings)
 
     # Verify the message is deleted
     async with get_session() as session:
