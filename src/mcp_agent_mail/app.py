@@ -1271,6 +1271,29 @@ async def _get_or_create_agent(
     return agent
 
 
+async def _get_or_create_cross_project_alias(
+    project: Project,
+    sender: Agent,
+    settings: Settings,
+) -> Agent:
+    """Create or reuse a sender alias in the target project without stealing the original handle."""
+
+    alias_hint = f"{sender.name}_{project.slug or project.human_key or project.id or 'project'}"
+    alias_name_pref = sanitize_agent_name(alias_hint) or sanitize_agent_name(sender.name) or sender.name
+    existing = await _get_agent_optional(project, alias_name_pref)
+    if existing:
+        return existing
+
+    alias_name = await _generate_unique_agent_name(
+        project,
+        settings,
+        alias_name_pref,
+        retire_conflicts=False,
+        include_same_project_conflicts=True,
+    )
+    return await _create_agent_record(project, alias_name, sender.program, sender.model, sender.task_description)
+
+
 async def _ensure_cross_project_link(
     source_project: Project,
     source_agent: Agent,
@@ -2217,12 +2240,15 @@ def build_mcp_server() -> FastMCP:
         importance: str,
         ack_required: bool,
         thread_id: Optional[str],
+        *,
+        allow_empty_recipients: bool = False,
     ) -> dict[str, Any]:
         # Re-fetch settings at call time so tests that mutate env + clear cache take effect
         settings = get_settings()
         call_start = time.perf_counter()
-        if not to_names and not cc_names and not bcc_names:
+        if not to_names and not cc_names and not bcc_names and not allow_empty_recipients:
             raise ValueError("At least one recipient must be specified.")
+
         def _unique(items: Sequence[str]) -> list[str]:
             seen: set[str] = set()
             ordered: list[str] = []
@@ -2235,9 +2261,14 @@ def build_mcp_server() -> FastMCP:
         to_names = _unique(to_names)
         cc_names = _unique(cc_names)
         bcc_names = _unique(bcc_names)
-        to_agents = [await _get_agent(project, name) for name in to_names]
-        cc_agents = [await _get_agent(project, name) for name in cc_names]
-        bcc_agents = [await _get_agent(project, name) for name in bcc_names]
+        if to_names or cc_names or bcc_names:
+            to_agents = [await _get_agent(project, name) for name in to_names]
+            cc_agents = [await _get_agent(project, name) for name in cc_names]
+            bcc_agents = [await _get_agent(project, name) for name in bcc_names]
+        else:
+            to_agents = []
+            cc_agents = []
+            bcc_agents = []
         recipient_records: list[tuple[Agent, str]] = [(agent, "to") for agent in to_agents]
         recipient_records.extend((agent, "cc") for agent in cc_agents)
         recipient_records.extend((agent, "bcc") for agent in bcc_agents)
@@ -2503,7 +2534,9 @@ def build_mcp_server() -> FastMCP:
         await ctx.info(f"Invoking extended tool: {tool_name}")
 
         try:
-            result = await tool_func(ctx, **arguments)
+            if hasattr(tool_func, "run"):
+                return await tool_func.run(arguments or {})
+            result = await tool_func(ctx, **(arguments or {}))
             return result
         except TypeError as e:
             # Invalid arguments
@@ -3431,30 +3464,30 @@ def build_mcp_server() -> FastMCP:
                     )
 
         deliveries: list[dict[str, Any]] = []
-        # Local deliver if any
-        if local_to or local_cc or local_bcc:
-            payload_local = await _deliver_message(
-                ctx,
-                "send_message",
-                project,
-                sender,
-                local_to,
-                local_cc,
-                local_bcc,
-                subject,
-                body_md,
-                attachment_paths,
-                convert_images,
-                importance,
-                ack_required,
-                thread_id,
-            )
-            deliveries.append({"project": project.human_key, "payload": payload_local})
+        # Always record an outbox copy so replies can reference the thread even when all recipients are external
+        payload_local = await _deliver_message(
+            ctx,
+            "send_message",
+            project,
+            sender,
+            local_to,
+            local_cc,
+            local_bcc,
+            subject,
+            body_md,
+            attachment_paths,
+            convert_images,
+            importance,
+            ack_required,
+            thread_id,
+            allow_empty_recipients=not (local_to or local_cc or local_bcc),
+        )
+        deliveries.append({"project": project.human_key, "payload": payload_local})
         # External per-target project deliver (requires aliasing sender in target project)
         for _pid, group in external.items():
             p: Project = group["project"]
             try:
-                alias = await _get_or_create_agent(p, sender.name, sender.program, sender.model, sender.task_description, settings_local)
+                alias = await _get_or_create_cross_project_alias(p, sender, settings_local)
                 payload_ext = await _deliver_message(
                     ctx,
                     "send_message",

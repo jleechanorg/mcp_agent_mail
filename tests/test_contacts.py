@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
+from mcp_agent_mail import config as _config
 from mcp_agent_mail.app import build_mcp_server
 
 
 @pytest.mark.asyncio
-async def test_contact_policy_block_all_blocks_direct_message(isolated_env):
+async def test_contact_policy_block_all_allows_message(isolated_env, monkeypatch):
+    """Test that block_all policy doesn't actually block (enforcement removed)."""
+    monkeypatch.setenv("CONTACT_ENFORCEMENT_ENABLED", "false")
+    with contextlib.suppress(Exception):
+        _config.clear_settings_cache()
     server = build_mcp_server()
 
     async with Client(server) as client:
@@ -21,27 +28,33 @@ async def test_contact_policy_block_all_blocks_direct_message(isolated_env):
             "register_agent",
             {"project_key": "Backend", "program": "codex", "model": "gpt-5", "name": "BlueLake"},
         )
+        # Set block_all policy (for backward compatibility, but doesn't enforce)
         await client.call_tool(
             "set_contact_policy",
             {"project_key": "Backend", "agent_name": "BlueLake", "policy": "block_all"},
         )
 
-        with pytest.raises(ToolError) as excinfo:
-            await client.call_tool(
-                "send_message",
-                {
-                    "project_key": "Backend",
-                    "sender_name": "GreenCastle",
-                    "to": ["BlueLake"],
-                    "subject": "Hello",
-                    "body_md": "test",
-                },
-            )
-        assert "Recipient is not accepting messages" in str(excinfo.value)
+        # Message should go through despite block_all policy
+        result = await client.call_tool(
+            "send_message",
+            {
+                "project_key": "Backend",
+                "sender_name": "GreenCastle",
+                "to": ["BlueLake"],
+                "subject": "Hello",
+                "body_md": "test",
+            },
+        )
+        assert result is not None
+        assert result.data.get("count") == 1
 
 
 @pytest.mark.asyncio
-async def test_contacts_only_requires_approval_then_allows(isolated_env):
+async def test_contacts_only_requires_approval_then_allows(isolated_env, monkeypatch):
+    """Test that messaging works even with contacts_only policy (enforcement removed)."""
+    monkeypatch.setenv("CONTACT_ENFORCEMENT_ENABLED", "false")
+    with contextlib.suppress(Exception):
+        _config.clear_settings_cache()
     server = build_mcp_server()
 
     async with Client(server) as client:
