@@ -2234,7 +2234,6 @@ def build_http_app(settings: Settings, server=None) -> FastAPI:
                                     program,
                                     model,
                                     task_description,
-                                    contact_policy,
                                     attachments_policy,
                                     inception_ts,
                                     last_active_ts
@@ -2245,7 +2244,6 @@ def build_http_app(settings: Settings, server=None) -> FastAPI:
                                     :program,
                                     :model,
                                     :task,
-                                    :policy,
                                     :attachments_policy,
                                     :ts,
                                     :ts
@@ -2257,7 +2255,6 @@ def build_http_app(settings: Settings, server=None) -> FastAPI:
                                 "program": "WebUI",
                                 "model": "Human",
                                 "task": "Human operator providing guidance and oversight to agents",
-                                "policy": "open",
                                 "attachments_policy": "auto",
                                 "ts": datetime.now(timezone.utc),
                             },

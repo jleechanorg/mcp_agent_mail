@@ -2953,19 +2953,26 @@ def build_mcp_server() -> FastMCP:
                     target_agent_found: Optional[Agent] = None
 
                     if explicit_override and target_project_override is not None:
-                        # Explicit project override: get or create agent in target project
+                        # Explicit project override: look up agent in target project
                         try:
-                            target_agent_found = await _get_or_create_agent(
-                                target_project_override,
-                                canonical,
-                                sender.program,
-                                sender.model,
-                                sender.task_description,
-                                settings_local,
-                            )
+                            target_agent_found = await _get_agent(target_project_override, canonical)
                             target_project_found = target_project_override
-                        except Exception:
-                            pass
+                        except NoResultFound:
+                            # Agent not found in target project
+                            label = target_project_override.human_key or target_project_override.slug or "(unknown project)"
+                            unknown_external.setdefault(label, []).append(display_value or candidate.strip() or candidate)
+                            continue
+                        except Exception as exc:
+                            import logging
+                            logger = logging.getLogger(__name__)
+                            logger.warning(
+                                "Failed to get agent in target project",
+                                extra={
+                                    "target_project": getattr(target_project_override, "id", str(target_project_override)),
+                                    "canonical": canonical,
+                                    "error": str(exc),
+                                },
+                            )
                     else:
                         # Global agent lookup: find agent by name across all projects
                         try:
@@ -3310,19 +3317,26 @@ def build_mcp_server() -> FastMCP:
                     target_agent_found: Optional[Agent] = None
 
                     if explicit_override and target_project_override is not None:
-                        # Explicit project override: get or create agent in target project
+                        # Explicit project override: look up agent in target project
                         try:
-                            target_agent_found = await _get_or_create_agent(
-                                target_project_override,
-                                target_name_override,
-                                sender.program,
-                                sender.model,
-                                sender.task_description,
-                                settings_local,
-                            )
+                            target_agent_found = await _get_agent(target_project_override, target_name_override or nm)
                             target_project_found = target_project_override
-                        except Exception:
-                            pass
+                        except NoResultFound:
+                            # Agent not found in target project
+                            label = target_project_override.human_key or target_project_override.slug or "(unknown project)"
+                            unknown_external.setdefault(label, []).append(candidate)
+                            continue
+                        except Exception as exc:
+                            import logging
+                            logger = logging.getLogger(__name__)
+                            logger.warning(
+                                "Failed to get agent in target project",
+                                extra={
+                                    "target_project": getattr(target_project_override, "id", None),
+                                    "target_name": target_name_override,
+                                    "error": str(exc),
+                                },
+                            )
                     else:
                         # Global agent lookup: find agent by name across all projects
                         try:

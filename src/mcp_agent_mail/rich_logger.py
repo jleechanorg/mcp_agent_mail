@@ -777,7 +777,6 @@ def display_startup_banner(settings: Any, host: str, port: int, path: str) -> No
     stats_table.add_row("🤖 Agents", f"[bold bright_green]{db_stats['agents']}[/bold bright_green]")
     stats_table.add_row("📬 Messages", f"[bold bright_green]{db_stats['messages']}[/bold bright_green]")
     stats_table.add_row("🔐 File Reservations", f"[bold bright_green]{db_stats['file_reservations']}[/bold bright_green]")
-    stats_table.add_row("🔗 Contact Links", f"[bold bright_green]{db_stats['contact_links']}[/bold bright_green]")
 
     # Display tables side by side
     columns = Columns([server_table, stats_table], equal=True, expand=True)
@@ -866,7 +865,7 @@ def _get_database_stats() -> dict[str, int]:
         from sqlalchemy import func, select
 
         from .db import get_session
-        from .models import Agent, AgentLink, FileReservation, Message, Project
+        from .models import Agent, FileReservation, Message, Project
 
         async def fetch_stats() -> dict[str, int]:
             try:
@@ -875,14 +874,12 @@ def _get_database_stats() -> dict[str, int]:
                     agents = await session.scalar(select(func.count()).select_from(Agent))
                     messages = await session.scalar(select(func.count()).select_from(Message))
                     file_reservations = await session.scalar(select(func.count()).select_from(FileReservation))
-                    contact_links = await session.scalar(select(func.count()).select_from(AgentLink))
 
                     return {
                         "projects": projects or 0,
                         "agents": agents or 0,
                         "messages": messages or 0,
                         "file_reservations": file_reservations or 0,
-                        "contact_links": contact_links or 0,
                     }
             except Exception:
                 return {
@@ -890,7 +887,6 @@ def _get_database_stats() -> dict[str, int]:
                     "agents": 0,
                     "messages": 0,
                     "file_reservations": 0,
-                    "contact_links": 0,
                 }
 
         # Try to get stats, but don't fail startup if DB isn't ready
@@ -908,5 +904,4 @@ def _get_database_stats() -> dict[str, int]:
             "agents": 0,
             "messages": 0,
             "file_reservations": 0,
-            "contact_links": 0,
         }
