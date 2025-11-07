@@ -1210,7 +1210,19 @@ async def _get_or_create_agent(
                         settings=settings,
                         include_same_project=False,
                     )
-                    desired_name = sanitized
+                    # Verify retirement cleared the conflict; otherwise provide a clear path
+                    if await _agent_name_exists_globally(sanitized):
+                        if mode == "strict":
+                            raise ToolExecutionError(
+                                "NAME_TAKEN",
+                                f"Agent name '{sanitized}' is still in use after attempting retirement.",
+                                recoverable=True,
+                                data={"name": sanitized, "conflict": "residual_or_race"},
+                            )
+                        # Fallback to auto-generate a unique name
+                        desired_name = await _generate_unique_agent_name(project, settings, None)
+                    else:
+                        desired_name = sanitized
             else:
                 # Globally unique, safe to use
                 desired_name = sanitized

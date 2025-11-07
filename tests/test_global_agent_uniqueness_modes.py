@@ -56,14 +56,14 @@ async def test_agent_names_coerce_mode_auto_generates_unique_names(isolated_env)
         # Should reuse the same name "Alice" (after retiring the project1 agent)
         assert result2.data["name"] == "Alice"
         assert result2.data["project_id"] != result1.data["project_id"]
-        
+
         # Verify that the old agent was retired
         async with get_session() as session:
             proj1 = (await session.execute(
                 select(Project).where(Project.human_key == "/tmp/project1")
             )).scalars().first()
             assert proj1 is not None
-            
+
             retired_agents = (await session.execute(
                 select(Agent).where(
                     Agent.project_id == proj1.id,
