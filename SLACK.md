@@ -12,6 +12,7 @@ Full bidirectional integration between MCP Agent Mail and Slack, enabling agents
 - [Automatic Notifications](#automatic-notifications)
 - [Webhook Integration](#webhook-integration)
 - [Examples](#examples)
+- [Known Limitations](#known-limitations)
 - [Troubleshooting](#troubleshooting)
 
 ## Features
@@ -368,6 +369,40 @@ if dev_channel:
         text="Hello from MCP Agent Mail!"
     )
 ```
+
+## Known Limitations
+
+### Thread Mapping Persistence
+
+**Current Behavior:**
+Thread mappings between MCP message threads and Slack threads are stored in-memory only. These mappings are lost when the server restarts.
+
+**Impact:**
+After a server restart, if you send a message to an existing MCP thread that was previously mapped to a Slack thread, the integration will create a **new top-level Slack message** instead of replying to the existing Slack thread.
+
+**Example:**
+```
+1. Send MCP message with thread_id="FEAT-123" → Creates Slack thread A
+2. Server restarts (mappings lost)
+3. Send another MCP message with thread_id="FEAT-123" → Creates new Slack thread B
+```
+
+**Workaround:**
+Keep the server running during active conversations, or accept that thread continuity will break across restarts for now.
+
+**Future Enhancement:**
+For production deployments, thread mappings should be persisted to the database to survive server restarts. This is tracked as a future enhancement.
+
+### File Upload Performance
+
+**Current Behavior:**
+File uploads use synchronous file I/O which may briefly block the event loop for large files.
+
+**Impact:**
+Minimal for typical files. May cause slight latency for very large file uploads (> 10MB).
+
+**Future Enhancement:**
+Consider async file I/O (aiofiles or asyncio.to_thread()) for improved performance with large files.
 
 ## Troubleshooting
 

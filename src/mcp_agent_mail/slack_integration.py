@@ -51,6 +51,13 @@ class SlackClient:
     - Managing threads
     - Handling reactions
     - Socket Mode event streaming (for bidirectional sync)
+
+    Thread Mapping Limitation:
+        Thread mappings between MCP threads and Slack threads are stored in-memory
+        and will be lost on server restart. After a restart, messages in an existing
+        MCP thread will create new top-level Slack messages instead of replying to
+        the existing Slack thread. For production use, consider persisting mappings
+        to the database.
     """
 
     def __init__(self, settings: SlackSettings):
@@ -58,9 +65,14 @@ class SlackClient:
 
         Args:
             settings: Slack configuration from Settings
+
+        Note:
+            Thread mappings are stored in-memory and will be lost on restart.
         """
         self.settings = settings
         self._http_client: Optional[httpx.AsyncClient] = None
+        # Note: In-memory thread mappings - lost on restart
+        # TODO: Persist to database for production use
         self._thread_mappings: dict[str, SlackThreadMapping] = {}
         self._reverse_thread_mappings: dict[tuple[str, str], str] = {}
         self._mappings_lock = asyncio.Lock()
@@ -203,11 +215,17 @@ class SlackClient:
 
         Returns:
             Slack API response
+
+        Note:
+            Currently uses synchronous file I/O which may block the event loop
+            for large files. Consider using aiofiles or asyncio.to_thread() for
+            async file operations in future improvements.
         """
         self._check_client()
         assert self._http_client is not None
 
         # Read file into bytes before async request
+        # TODO: Consider using aiofiles for non-blocking file I/O
         with file_path.open("rb") as f:
             file_bytes = f.read()
 
@@ -320,6 +338,9 @@ class SlackClient:
         slack_thread_ts: str,
     ) -> None:
         """Map an MCP thread ID to a Slack thread.
+
+        Note:
+            Mapping is stored in-memory only and will be lost on restart.
 
         Args:
             mcp_thread_id: MCP message thread ID
@@ -585,6 +606,11 @@ async def notify_slack_ack(
 ) -> Optional[dict[str, Any]]:
     """Send a notification to Slack when a message is acknowledged.
 
+    Note:
+        Unlike notify_slack_message, this function does not raise exceptions
+        on failure. Acknowledgment notifications are non-critical; errors are
+        logged but do not propagate to prevent disrupting the ack workflow.
+
     Args:
         client: Connected SlackClient instance
         settings: Application settings
@@ -593,7 +619,10 @@ async def notify_slack_ack(
         subject: Original message subject
 
     Returns:
-        Slack API response if sent, None if disabled
+        Slack API response if sent, None if disabled or on error
+
+    Raises:
+        Does not raise exceptions; logs errors and returns None on failure
     """
     if not settings.slack.enabled or not settings.slack.notify_on_ack:
         return None
