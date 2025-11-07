@@ -39,6 +39,8 @@ class Agent(SQLModel, table=True):
     inception_ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_active_ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     attachments_policy: str = Field(default="auto", max_length=16)
+    is_active: bool = Field(default=True)
+    deleted_ts: Optional[datetime] = Field(default=None)
 
 
 class MessageRecipient(SQLModel, table=True):

@@ -6,9 +6,9 @@ import pytest
 from fastmcp import Client
 
 from mcp_agent_mail.app import (
+    _EXTENDED_TOOL_REGISTRY,
     CORE_TOOLS,
     EXTENDED_TOOLS,
-    _EXTENDED_TOOL_REGISTRY,
     build_mcp_server,
 )
 

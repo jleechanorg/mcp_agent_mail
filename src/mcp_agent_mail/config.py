@@ -10,7 +10,14 @@ from typing import Final
 from decouple import Config as DecoupleConfig, RepositoryEnv
 
 _DOTENV_PATH: Final[Path] = Path(".env")
-_decouple_config: Final[DecoupleConfig] = DecoupleConfig(RepositoryEnv(str(_DOTENV_PATH)))
+
+# Create config that gracefully handles missing .env file
+if _DOTENV_PATH.exists():
+    _decouple_config: Final[DecoupleConfig] = DecoupleConfig(RepositoryEnv(str(_DOTENV_PATH)))
+else:
+    # Fall back to environment variables only when .env doesn't exist (e.g., in CI)
+    from decouple import config as _env_config
+    _decouple_config: Final[DecoupleConfig] = _env_config  # type: ignore[assignment]
 
 
 @dataclass(slots=True, frozen=True)

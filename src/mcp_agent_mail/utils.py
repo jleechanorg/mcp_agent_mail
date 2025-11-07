@@ -46,7 +46,7 @@ def slugify(value: str) -> str:
 
 
 def generate_agent_name() -> str:
-    """Return a random adjective+noun combination."""
+    """Return a random codename composed from the adjective/noun pools."""
     adjective = random.choice(tuple(ADJECTIVES))
     noun = random.choice(tuple(NOUNS))
     return f"{adjective}{noun}"

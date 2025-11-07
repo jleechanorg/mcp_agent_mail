@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastmcp import Client
 
@@ -54,6 +56,40 @@ async def test_register_agent_accepts_freeform_names(isolated_env):
             {"project_key": "Backend", "agent_name": "BackendHarmonizer"},
         )
         assert who.data.get("name") == "BackendHarmonizer"
+
+
+@pytest.mark.asyncio
+async def test_project_resource_hides_inactive_agents(isolated_env):
+    server = build_mcp_server()
+    async with Client(server) as client:
+        backend_key = "/backend"
+        other_key = "/other"
+        backend = await client.call_tool("ensure_project", {"human_key": backend_key})
+        await client.call_tool("ensure_project", {"human_key": other_key})
+
+        # Active agent in backend
+        await client.call_tool(
+            "register_agent",
+            {"project_key": backend_key, "program": "codex", "model": "gpt-5", "name": "BlueLake"},
+        )
+
+        # Register Convo in backend, then reclaim in other project to retire the backend copy
+        await client.call_tool(
+            "register_agent",
+            {"project_key": backend_key, "program": "codex", "model": "gpt-5", "name": "Convo"},
+        )
+        await client.call_tool(
+            "register_agent",
+            {"project_key": other_key, "program": "codex", "model": "gpt-5", "name": "Convo"},
+        )
+
+        slug = backend.data.get("slug", "backend")
+        blocks = await client.read_resource(f"resource://project/{slug}")
+        assert blocks, "project resource returned no blocks"
+        payload = json.loads(blocks[0].text or "{}")
+        names = [agent.get("name") for agent in payload.get("agents", [])]
+        assert "BlueLake" in names
+        assert "Convo" not in names, "Inactive agent was returned by project resource"
 
 
 @pytest.mark.asyncio
