@@ -37,10 +37,10 @@ echo "✅ Installed ai-universe-mail from PyPI"
 
 # Load token from environment or .env file
 if [[ -z "${HTTP_BEARER_TOKEN:-}" ]]; then
-  if [[ -f ~/.config/mcp-agent-mail/.env ]]; then
-    HTTP_BEARER_TOKEN=$(grep -E '^HTTP_BEARER_TOKEN=' ~/.config/mcp-agent-mail/.env | sed -E 's/^HTTP_BEARER_TOKEN=//') || true
-  elif [[ -f /Users/jleechan/mcp_agent_mail/.env ]]; then
-    HTTP_BEARER_TOKEN=$(grep -E '^HTTP_BEARER_TOKEN=' /Users/jleechan/mcp_agent_mail/.env | sed -E 's/^HTTP_BEARER_TOKEN=//') || true
+  # Allow user to specify an alternative .env file via MCP_AGENT_MAIL_ENV_PATH
+  ENV_PATH="${MCP_AGENT_MAIL_ENV_PATH:-$HOME/.config/mcp-agent-mail/.env}"
+  if [[ -f "$ENV_PATH" ]]; then
+    HTTP_BEARER_TOKEN=$(grep -E '^HTTP_BEARER_TOKEN=' "$ENV_PATH" | sed -E 's/^HTTP_BEARER_TOKEN=//') || true
   fi
 fi
 
