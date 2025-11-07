@@ -1270,51 +1270,49 @@ async def _delete_agent(project: Project, name: str, settings: Settings) -> dict
         "agent_links_deleted": 0,
     }
 
-    async with get_session() as session:
-        # Execute atomically in a transaction
-        async with session.begin():
-            # First, get IDs of messages sent by this agent (needed for cascading deletes)
-            msg_result = await session.execute(
-                select(Message.id).where(Message.sender_id == agent_id)
+    async with get_session() as session, session.begin():
+        # First, get IDs of messages sent by this agent (needed for cascading deletes)
+        msg_result = await session.execute(
+            select(Message.id).where(Message.sender_id == agent_id)
+        )
+        message_ids = [row[0] for row in msg_result.all()]
+
+        # 1) Delete MessageRecipient records where this agent is the recipient
+        res1 = await session.execute(
+            delete(MessageRecipient).where(MessageRecipient.agent_id == agent_id)
+        )
+        stats["message_recipients_deleted"] = int(res1.rowcount or 0)
+
+        # 2) Delete MessageRecipient records for messages authored by this agent
+        #    (Must be done BEFORE deleting the messages to avoid FK violations)
+        if message_ids:
+            res2 = await session.execute(
+                delete(MessageRecipient).where(cast(Any, MessageRecipient.message_id).in_(message_ids))
             )
-            message_ids = [row[0] for row in msg_result.all()]
+            stats["message_recipients_deleted"] += int(res2.rowcount or 0)
 
-            # 1) Delete MessageRecipient records where this agent is the recipient
-            res1 = await session.execute(
-                delete(MessageRecipient).where(MessageRecipient.agent_id == agent_id)
+        # 3) Now safe to delete messages sent by the agent
+        res3 = await session.execute(
+            delete(Message).where(Message.sender_id == agent_id)
+        )
+        stats["messages_deleted"] = int(res3.rowcount or 0)
+
+        # 4) Delete file reservations
+        res4 = await session.execute(
+            delete(FileReservation).where(FileReservation.agent_id == agent_id)
+        )
+        stats["file_reservations_deleted"] = int(res4.rowcount or 0)
+
+        # 5) Delete agent links (both as source and target)
+        res5 = await session.execute(
+            delete(AgentLink).where(
+                or_(AgentLink.a_agent_id == agent_id, AgentLink.b_agent_id == agent_id)
             )
-            stats["message_recipients_deleted"] = int(res1.rowcount or 0)
+        )
+        stats["agent_links_deleted"] = int(res5.rowcount or 0)
 
-            # 2) Delete MessageRecipient records for messages authored by this agent
-            #    (Must be done BEFORE deleting the messages to avoid FK violations)
-            if message_ids:
-                res2 = await session.execute(
-                    delete(MessageRecipient).where(MessageRecipient.message_id.in_(message_ids))
-                )
-                stats["message_recipients_deleted"] += int(res2.rowcount or 0)
-
-            # 3) Now safe to delete messages sent by the agent
-            res3 = await session.execute(
-                delete(Message).where(Message.sender_id == agent_id)
-            )
-            stats["messages_deleted"] = int(res3.rowcount or 0)
-
-            # 4) Delete file reservations
-            res4 = await session.execute(
-                delete(FileReservation).where(FileReservation.agent_id == agent_id)
-            )
-            stats["file_reservations_deleted"] = int(res4.rowcount or 0)
-
-            # 5) Delete agent links (both as source and target)
-            res5 = await session.execute(
-                delete(AgentLink).where(
-                    or_(AgentLink.a_agent_id == agent_id, AgentLink.b_agent_id == agent_id)
-                )
-            )
-            stats["agent_links_deleted"] = int(res5.rowcount or 0)
-
-            # 6) Finally, delete the agent itself
-            await session.execute(delete(Agent).where(Agent.id == agent_id))
+        # 6) Finally, delete the agent itself
+        await session.execute(delete(Agent).where(Agent.id == agent_id))
 
     # Write deletion marker to Git archive
     archive = await ensure_archive(settings, project.slug)
@@ -2121,9 +2119,10 @@ CORE_TOOLS = {
     "mark_message_read",
 }
 
-# Extended tools (~16k tokens): Advanced features available via meta-tools  
+# Extended tools (~16k tokens): Advanced features available via meta-tools
 EXTENDED_TOOLS = {
     "create_agent_identity",
+    "delete_agent",
     "acknowledge_message",
     "search_messages",
     "request_contact",
@@ -2149,6 +2148,7 @@ EXTENDED_TOOL_METADATA = {
     "acknowledge_message": {"category": "messaging", "description": "Acknowledge a message (sets both read_ts and ack_ts)"},
     "search_messages": {"category": "search", "description": "Full-text search over subject and body"},
     "create_agent_identity": {"category": "identity", "description": "Create a new unique agent identity"},
+    "delete_agent": {"category": "identity", "description": "Permanently delete an agent and related records (destructive, irreversible)"},
     "request_contact": {"category": "contact", "description": "Request contact approval to message another agent"},
     "respond_contact": {"category": "contact", "description": "Approve or deny a contact request"},
     "list_contacts": {"category": "contact", "description": "List contact links for an agent"},
