@@ -2963,8 +2963,6 @@ def build_mcp_server() -> FastMCP:
                             unknown_external.setdefault(label, []).append(display_value or candidate.strip() or candidate)
                             continue
                         except Exception as exc:
-                            import logging
-                            logger = logging.getLogger(__name__)
                             logger.warning(
                                 "Failed to get agent in target project",
                                 extra={
@@ -3327,8 +3325,6 @@ def build_mcp_server() -> FastMCP:
                             unknown_external.setdefault(label, []).append(candidate)
                             continue
                         except Exception as exc:
-                            import logging
-                            logger = logging.getLogger(__name__)
                             logger.warning(
                                 "Failed to get agent in target project",
                                 extra={
