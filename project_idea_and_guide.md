@@ -33,7 +33,7 @@ Core idea, constraints, and assumptions
     Messages are GFM markdown persisted in Git (per project), plus SQLite metadata with FTS5 for search; Git commits on each message/file_reservation update let us piggyback diffing, history, and blame.
     SQLite
 
-    Agents get ephemeral, memorable identities (e.g., GreenCastle) bound to program/model, inception time, project id, and task description; generated from adjective+noun sets. (You can swap in a library like unique-names-generator if you prefer.)
+    Agents get ephemeral, memorable identities (e.g., GreenCastle) bound to program/model, inception time, project id, and task description. When you don't supply a custom name we auto-generate one from adjective/noun sets (swap in unique-names-generator or similar if you prefer). Reusing a name retires the previous identity automatically so there is never more than one active owner of a handle.
     PyPI
 
 Why MCP + FastMCP + Streamable HTTP
@@ -363,7 +363,7 @@ def _unique_agent_name(conn: sqlite3.Connection, project_id: str, hint: Optional
             row = conn.execute("SELECT 1 FROM agents WHERE project_id=? AND name=?", (project_id, candidate)).fetchone()
             if not row:
                 return candidate
-    # generate adjective+noun
+    # generate fallback codename from adjective/noun pool
     import random
     for _ in range(1000):
         candidate = f"{random.choice(ADJECTIVES)}{random.choice(NOUNS)}"

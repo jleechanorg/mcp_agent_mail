@@ -44,12 +44,12 @@ from .share import (
     build_materialized_views,
     build_search_indexes,
     bundle_attachments,
-    finalize_snapshot_for_export,
     copy_viewer_assets,
     create_sqlite_snapshot,
     detect_hosting_hints,
     encrypt_bundle,
     export_viewer_data,
+    finalize_snapshot_for_export,
     maybe_chunk_database,
     package_directory_as_zip,
     prepare_output_directory,
@@ -871,12 +871,12 @@ def share_wizard() -> None:
         if alt_path.exists():
             wizard_script = alt_path
         else:
-            console.print(f"[red]Wizard script not found.[/]")
-            console.print(f"[yellow]Expected locations:[/]")
+            console.print("[red]Wizard script not found.[/]")
+            console.print("[yellow]Expected locations:[/]")
             console.print(f"  • {wizard_script}")
             console.print(f"  • {alt_path}")
-            console.print(f"\n[yellow]This command only works when running from source.[/]")
-            console.print(f"[cyan]Run the wizard directly:[/] python scripts/share_to_github_pages.py")
+            console.print("\n[yellow]This command only works when running from source.[/]")
+            console.print("[cyan]Run the wizard directly:[/] python scripts/share_to_github_pages.py")
             raise typer.Exit(code=1)
 
     try:
@@ -885,7 +885,7 @@ def share_wizard() -> None:
         raise typer.Exit(code=result.returncode)
     except KeyboardInterrupt:
         console.print("\n[yellow]Wizard cancelled by user[/]")
-        raise typer.Exit(code=0)
+        raise typer.Exit(code=0) from None
 
 
 def _resolve_path(raw_path: str | Path) -> Path:
