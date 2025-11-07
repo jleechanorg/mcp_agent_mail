@@ -4,7 +4,6 @@ import contextlib
 
 import pytest
 from fastmcp import Client
-from fastmcp.exceptions import ToolError
 
 from mcp_agent_mail import config as _config
 from mcp_agent_mail.app import build_mcp_server
