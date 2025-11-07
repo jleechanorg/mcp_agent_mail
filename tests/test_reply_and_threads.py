@@ -16,11 +16,7 @@ async def test_reply_preserves_thread_and_subject_prefix(isolated_env):
                 "register_agent",
                 {"project_key": "Backend", "program": "x", "model": "y", "name": n},
             )
-        # Allow direct messaging without contact gating for this test
-        await client.call_tool(
-            "set_contact_policy",
-            {"project_key": "Backend", "agent_name": "BlueLake", "policy": "open"},
-        )
+        # Note: Contact gating has been removed, direct messaging works by default
 
         orig = await client.call_tool(
             "send_message",
@@ -78,10 +74,7 @@ async def test_reply_handles_reclaimed_names(isolated_env):
             "register_agent",
             {"project_key": project_a, "program": "codex", "model": "gpt", "name": "Alpha"},
         )
-        await client.call_tool(
-            "set_contact_policy",
-            {"project_key": project_a, "agent_name": "Alpha", "policy": "open"},
-        )
+        # Note: Contact gating has been removed, direct messaging works by default
 
         # Convo first exists in project A, then is reclaimed in project B (retiring the local copy)
         await client.call_tool(
@@ -92,10 +85,7 @@ async def test_reply_handles_reclaimed_names(isolated_env):
             "register_agent",
             {"project_key": project_b, "program": "codex", "model": "gpt", "name": "Convo"},
         )
-        await client.call_tool(
-            "set_contact_policy",
-            {"project_key": project_b, "agent_name": "Convo", "policy": "open"},
-        )
+        # Note: Contact gating has been removed, direct messaging works by default
 
         # Alpha sends a message to Convo (auto-routes cross-project after reclamation)
         send_result = await client.call_tool(

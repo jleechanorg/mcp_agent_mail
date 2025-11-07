@@ -61,14 +61,14 @@ async def test_call_extended_tool_valid(isolated_env):
         })
 
         # Test calling an extended tool via the meta-tool
-        # Use list_contacts as it's a simple read-only tool
+        # Use search_messages as it's a simple read-only tool
         result = await client.call_tool(
             "call_extended_tool",
             arguments={
-                "tool_name": "list_contacts",
+                "tool_name": "search_messages",
                 "arguments": {
                     "project_key": "/tmp/test_project",
-                    "agent_name": "test_agent"
+                    "query": "test"
                 }
             }
         )
@@ -106,7 +106,7 @@ async def test_call_extended_tool_invalid_arguments(isolated_env):
             await client.call_tool(
                 "call_extended_tool",
                 arguments={
-                    "tool_name": "list_contacts",
+                    "tool_name": "search_messages",
                     "arguments": {
                         "wrong_arg": "value"
                     }
