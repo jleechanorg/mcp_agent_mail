@@ -123,6 +123,7 @@ Recommended conventions
 - **Single source of truth**: Use **Beads** for task status/priority/dependencies; use **Agent Mail** for conversation, decisions, and attachments (audit).
 - **Shared identifiers**: Use the Beads issue id (e.g., `bd-123`) as the Mail `thread_id` and prefix message subjects with `[bd-123]`.
 - **Reservations**: When starting a `bd-###` task, call `file_reservation_paths(...)` for the affected paths; include the issue id in the `reason` and release on completion.
+- **Be proactive**: The moment you discover a new bug, regression, or sizeable TODO, **open or update a Beads issue yourself** (`bd create …` / `bd update …`) before touching code. Don’t wait for a human—keeping the board accurate is part of every task.
 
 Typical flow (agents)
 1) **Pick ready work** (Beads)

@@ -83,3 +83,10 @@ See PR #13 for a real example where this model was applied:
 - Documentation in `roadmap/pr13_preexisting_bugs.md` explained the triage
 
 This ensures every merged PR maintains a clean history and working state.
+
+## Beads hygiene (agents are responsible)
+
+- Always keep Beads in lockstep with reality. If you uncover a new bug, regression, or TODO that isn’t already tracked, **open a Beads issue immediately** (`bd create ...`) before starting the fix.
+- Update Beads issue state as you work (`bd update`, `bd close`) so other agents see an accurate queue.
+- Mirror the Beads id in every Mail thread (`thread_id`, subject prefix) to keep the audit trail consistent.
+- Don’t wait for humans to ask—treat Beads upkeep as part of the job every time you touch code.
