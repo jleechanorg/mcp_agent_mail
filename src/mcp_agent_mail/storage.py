@@ -336,6 +336,17 @@ async def _ensure_repo(root: Path, settings: Settings) -> Repo:
 async def write_agent_profile(archive: ProjectArchive, agent: dict[str, object]) -> None:
     agent_name = agent["name"].__str__()
     # Sanitize agent_name to prevent path traversal
+    # Check for path separators before normalization to give clear error messages
+    if (
+        not agent_name
+        or "/" in agent_name
+        or "\\" in agent_name
+        or agent_name.startswith(".")
+        or agent_name == ".."
+    ):
+        raise ValueError(f"Invalid agent name: {agent_name!r}")
+
+    # Additional normalization for platform consistency
     normalized = agent_name.replace("\\", "/")
     if (
         not normalized
@@ -344,7 +355,6 @@ async def write_agent_profile(archive: ProjectArchive, agent: dict[str, object])
         or "/../" in normalized
         or normalized.endswith("/..")
         or normalized == ".."
-        or "/" in normalized
     ):
         raise ValueError(f"Invalid agent name: {agent_name!r}")
 
@@ -357,6 +367,17 @@ async def write_agent_profile(archive: ProjectArchive, agent: dict[str, object])
 async def write_agent_deletion_marker(archive: ProjectArchive, agent_name: str, deletion_stats: dict[str, object]) -> None:
     """Write a deletion marker to the Git archive for an agent."""
     # Sanitize agent_name to prevent path traversal
+    # Check for path separators before normalization to give clear error messages
+    if (
+        not agent_name
+        or "/" in agent_name
+        or "\\" in agent_name
+        or agent_name.startswith(".")
+        or agent_name == ".."
+    ):
+        raise ValueError(f"Invalid agent name: {agent_name!r}")
+
+    # Additional normalization for platform consistency
     normalized = agent_name.replace("\\", "/")
     if (
         not normalized
@@ -365,7 +386,6 @@ async def write_agent_deletion_marker(archive: ProjectArchive, agent_name: str, 
         or "/../" in normalized
         or normalized.endswith("/..")
         or normalized == ".."
-        or "/" in normalized
     ):
         raise ValueError(f"Invalid agent name: {agent_name!r}")
 
