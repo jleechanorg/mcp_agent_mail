@@ -20,6 +20,20 @@ For development with local code changes:
 bash -lc "cd /Users/jleechan/mcp_agent_mail && ./scripts/run_server_with_token.sh >/tmp/mcp_agent_mail_server.log 2>&1 & echo \$!"
 ```
 
+## Running from Local Build (Testing)
+
+For testing locally built packages before publishing to PyPI:
+
+```bash
+bash -lc "cd /Users/jleechan/mcp_agent_mail && ./scripts/run_server_local_build.sh >/tmp/mcp_agent_mail_server.log 2>&1 & echo \$!"
+```
+
+This script:
+- Uses the wheel file from `dist/` (built with `uv build`)
+- Installs in an isolated temporary virtual environment
+- Uses Python 3.11-3.13 (avoiding Python 3.14 RC due to Pydantic compatibility issues)
+- Runs the server from the locally built package
+
 ## General Notes
 
 - Keep the printed PID handy; stop the service with `kill <PID>` when you are done.
