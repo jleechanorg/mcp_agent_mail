@@ -1472,6 +1472,42 @@ async def _get_agent_optional(project: Project, name: str) -> Agent | None:
         return result.scalars().first()
 
 
+async def _get_agent_by_name(name: str) -> Agent:
+    """Get agent by name alone, ignoring project boundaries.
+
+    Since agent names are globally unique, we can look up agents
+    by name without needing project context.
+    """
+    await ensure_schema()
+    async with get_session() as session:
+        result = await session.execute(
+            select(Agent).where(
+                func.lower(Agent.name) == name.lower(),
+                cast(Any, Agent.is_active).is_(True),
+            )
+        )
+        agent = result.scalars().first()
+        if not agent:
+            raise NoResultFound(
+                f"Agent '{name}' not found. "
+                f"Tip: Use register_agent to create a new agent."
+            )
+        return agent
+
+
+async def _get_agent_by_name_optional(name: str) -> Agent | None:
+    """Get agent by name alone, returning None if not found."""
+    await ensure_schema()
+    async with get_session() as session:
+        result = await session.execute(
+            select(Agent).where(
+                func.lower(Agent.name) == name.lower(),
+                cast(Any, Agent.is_active).is_(True),
+            )
+        )
+        return result.scalars().first()
+
+
 async def _create_message(
     project: Project,
     sender: Agent,
@@ -1768,8 +1804,8 @@ async def _list_inbox(
     include_bodies: bool,
     since_ts: Optional[str],
 ) -> list[dict[str, Any]]:
-    if project.id is None or agent.id is None:
-        raise ValueError("Project and agent must have ids before listing inbox.")
+    if agent.id is None:
+        raise ValueError("Agent must have an id before listing inbox.")
     sender_alias = aliased(Agent)
     await ensure_schema()
     async with get_session() as session:
@@ -1778,7 +1814,6 @@ async def _list_inbox(
             .join(MessageRecipient, MessageRecipient.message_id == Message.id)
             .join(sender_alias, Message.sender_id == sender_alias.id)
             .where(
-                Message.project_id == project.id,
                 MessageRecipient.agent_id == agent.id,
             )
             .order_by(desc(Message.created_ts))
@@ -1809,14 +1844,14 @@ async def _list_outbox(
     since_ts: Optional[str],
 ) -> list[dict[str, Any]]:
     """List messages sent by the agent (their outbox)."""
-    if project.id is None or agent.id is None:
-        raise ValueError("Project and agent must have ids before listing outbox.")
+    if agent.id is None:
+        raise ValueError("Agent must have an id before listing outbox.")
     await ensure_schema()
     messages: list[dict[str, Any]] = []
     async with get_session() as session:
         stmt = (
             select(Message)
-            .where(Message.project_id == project.id, Message.sender_id == agent.id)
+            .where(Message.sender_id == agent.id)
             .order_by(desc(Message.created_ts))
             .limit(limit)
         )
@@ -2134,6 +2169,22 @@ async def _get_agent_by_id(project: Project, agent_id: int) -> Agent:
         return agent
 
 
+async def _get_agent_by_id_global(agent_id: int) -> Agent:
+    """Fetch active agent by ID globally (ignoring project boundaries)."""
+    await ensure_schema()
+    async with get_session() as session:
+        result = await session.execute(
+            select(Agent).where(
+                Agent.id == agent_id,
+                cast(Any, Agent.is_active).is_(True),
+            )
+        )
+        agent = result.scalars().first()
+        if not agent:
+            raise NoResultFound(f"Agent id '{agent_id}' not found or inactive.")
+        return agent
+
+
 async def _update_recipient_timestamp(
     agent: Agent,
     message_id: int,
@@ -2280,9 +2331,9 @@ def build_mcp_server() -> FastMCP:
         cc_names = _unique(cc_names)
         bcc_names = _unique(bcc_names)
         if to_names or cc_names or bcc_names:
-            to_agents = [await _get_agent(project, name) for name in to_names]
-            cc_agents = [await _get_agent(project, name) for name in cc_names]
-            bcc_agents = [await _get_agent(project, name) for name in bcc_names]
+            to_agents = [await _get_agent_by_name(name) for name in to_names]
+            cc_agents = [await _get_agent_by_name(name) for name in cc_names]
+            bcc_agents = [await _get_agent_by_name(name) for name in bcc_names]
         else:
             to_agents = []
             cc_agents = []
@@ -2922,6 +2973,10 @@ def build_mcp_server() -> FastMCP:
         """
         Send a Markdown message to one or more recipients and persist canonical and mailbox copies to Git.
 
+        NOTE: Agent names are globally unique. Recipients can be any registered agent by name,
+        regardless of project boundaries. The project_key parameter is informational only and
+        does not restrict which agents can communicate.
+
         Discovery
         ---------
         To discover available agent names for recipients, use: resource://agents/{project_key}
@@ -3071,30 +3126,28 @@ def build_mcp_server() -> FastMCP:
                 c.print(Panel(body, title=title, border_style="green"))
             except Exception:
                 pass
-        sender = await _get_agent(project, sender_name)
+        sender = await _get_agent_by_name(sender_name)
         settings_local = get_settings()
-        # Split recipients into local vs external (approved links)
-        local_to: list[str] = []
-        local_cc: list[str] = []
-        local_bcc: list[str] = []
-        external: dict[int, dict[str, Any]] = {}
+        # Collect all recipients (project boundaries don't matter anymore)
+        all_to: list[str] = []
+        all_cc: list[str] = []
+        all_bcc: list[str] = []
 
         async with get_session() as sx:
-            # Preload local agent names (normalized -> canonical stored name)
+            # Preload ALL agent names globally (since names are unique)
             existing = await sx.execute(
                 select(Agent.name).where(
-                    Agent.project_id == project.id,
                     cast(Any, Agent.is_active).is_(True),
                 )
             )
-            local_lookup: dict[str, str] = {}
+            global_lookup: dict[str, str] = {}
             for row in existing.fetchall():
                 canonical_name = (row[0] or "").strip()
                 if not canonical_name:
                     continue
                 sanitized_canonical = sanitize_agent_name(canonical_name) or canonical_name
                 for key in {canonical_name.lower(), sanitized_canonical.lower()}:
-                    local_lookup.setdefault(key, canonical_name)
+                    global_lookup.setdefault(key, canonical_name)
 
             sender_candidate_keys = {
                 key.lower()
@@ -3117,200 +3170,54 @@ def build_mcp_server() -> FastMCP:
                 canonical = sanitized or (trimmed if trimmed else None)
                 return trimmed or value, keys, canonical
 
-            unknown_local: set[str] = set()
-            unknown_external: dict[str, list[str]] = defaultdict(list)
-
-            class _ContactBlocked(Exception):
-                pass
+            unknown: set[str] = set()
 
             async def _route(name_list: list[str], kind: str) -> None:
+                """Simplified routing: look up agents globally by name."""
                 for raw in name_list:
-                    candidate = raw or ""
-                    explicit_override = False
-                    target_project_override: Project | None = None
-                    target_project_label: str | None = None
-                    agent_fragment = candidate
-
-                    # Explicit external addressing: project:<slug-or-key>#<AgentName>
-                    if candidate.startswith("project:") and "#" in candidate:
-                        explicit_override = True
-                        try:
-                            _, rest = candidate.split(":", 1)
-                            slug_part, agent_part = rest.split("#", 1)
-                            target_project_override = await _get_project_by_identifier(slug_part.strip())
-                            target_project_label = target_project_override.human_key or target_project_override.slug
-                            agent_fragment = agent_part
-                        except Exception:
-                            label = slug_part.strip() if "slug_part" in locals() and slug_part.strip() else "(invalid project)"
-                            unknown_external[label].append(candidate.strip() or candidate)
-                            continue
-
-                    # Alternate explicit format: <AgentName>@<project-identifier>
-                    if not explicit_override and "@" in candidate:
-                        name_part, project_part = candidate.split("@", 1)
-                        if name_part.strip() and project_part.strip():
-                            try:
-                                target_project_override = await _get_project_by_identifier(project_part.strip())
-                                target_project_label = target_project_override.human_key or target_project_override.slug
-                                agent_fragment = name_part
-                                explicit_override = True
-                            except Exception:
-                                label = project_part.strip() or "(invalid project)"
-                                unknown_external[label].append(candidate.strip() or candidate)
-                                continue
-
-                    display_value, key_candidates, canonical = _normalize(agent_fragment)
+                    # Strip whitespace and normalize
+                    display_value, key_candidates, canonical = _normalize(raw)
                     if not key_candidates or not canonical:
-                        if explicit_override:
-                            label = target_project_label or "(unknown project)"
-                            unknown_external[label].append(candidate.strip() or candidate)
-                        else:
-                            unknown_local.add(candidate.strip() or candidate)
+                        unknown.add(raw.strip() if raw else raw)
                         continue
 
-                    # Always allow self-send (local context only)
-                    if not explicit_override and sender_candidate_keys.intersection(key_candidates):
+                    # Allow self-send
+                    if sender_candidate_keys.intersection(key_candidates):
                         if kind == "to":
-                            local_to.append(sender.name)
+                            all_to.append(sender.name)
                         elif kind == "cc":
-                            local_cc.append(sender.name)
+                            all_cc.append(sender.name)
                         else:
-                            local_bcc.append(sender.name)
+                            all_bcc.append(sender.name)
                         continue
 
-                    if not explicit_override:
-                        resolved_local = None
-                        for key in key_candidates:
-                            resolved_local = local_lookup.get(key)
-                            if resolved_local:
-                                break
-                        if resolved_local:
-                            if kind == "to":
-                                local_to.append(resolved_local)
-                            elif kind == "cc":
-                                local_cc.append(resolved_local)
-                            else:
-                                local_bcc.append(resolved_local)
-                            continue
+                    # Look up agent globally by name
+                    resolved = None
+                    for key in key_candidates:
+                        resolved = global_lookup.get(key)
+                        if resolved:
+                            break
 
-                    lookup_value = canonical.lower()
-                    rows = None
-                    if explicit_override and target_project_override is not None:
-                        rows = await sx.execute(
-                            select(AgentLink, Project, Agent)
-                            .join(Project, Project.id == AgentLink.b_project_id)
-                            .join(Agent, Agent.id == AgentLink.b_agent_id)
-                            .where(
-                                AgentLink.a_project_id == project.id,
-                                AgentLink.a_agent_id == sender.id,
-                                AgentLink.status == "approved",
-                                Project.id == target_project_override.id,
-                                func.lower(Agent.name) == lookup_value,
-                                cast(Any, Agent.is_active).is_(True),
-                            )
-                            .limit(1)
-                        )
-                    else:
-                        rows = await sx.execute(
-                            select(AgentLink, Project, Agent)
-                            .join(Project, Project.id == AgentLink.b_project_id)
-                            .join(Agent, Agent.id == AgentLink.b_agent_id)
-                            .where(
-                                AgentLink.a_project_id == project.id,
-                                AgentLink.a_agent_id == sender.id,
-                                AgentLink.status == "approved",
-                                func.lower(Agent.name) == lookup_value,
-                                cast(Any, Agent.is_active).is_(True),
-                            )
-                            .limit(1)
-                        )
-
-                    rec = rows.first() if rows else None
-                    # Always allow auto cross-project linking (contact enforcement removed)
-                    if not rec:
-                        if explicit_override and target_project_override is not None:
-                            try:
-                                target_agent = await _get_or_create_agent(
-                                    target_project_override,
-                                    canonical,
-                                    sender.program,
-                                    sender.model,
-                                    sender.task_description,
-                                    settings_local,
-                                )
-                                ttl_seconds = int(getattr(settings_local, "contact_auto_ttl_seconds", 86400))
-                                link = await _ensure_cross_project_link(
-                                    project,
-                                    sender,
-                                    target_project_override,
-                                    target_agent,
-                                    ttl_seconds=ttl_seconds,
-                                    reason="auto-cross-project",
-                                )
-                                rec = (link, target_project_override, target_agent)
-                            except Exception:
-                                rec = None
+                    if resolved:
+                        if kind == "to":
+                            all_to.append(resolved)
+                        elif kind == "cc":
+                            all_cc.append(resolved)
                         else:
-                            try:
-                                global_matches = [
-                                    (proj, agent)
-                                    for proj, agent in await _lookup_agents_any_project(canonical)
-                                    if proj.id != project.id
-                                ]
-                            except Exception:
-                                global_matches = []
-                            if len(global_matches) == 1:
-                                target_project_override, target_agent = global_matches[0]
-                                try:
-                                    ttl_seconds = int(getattr(settings_local, "contact_auto_ttl_seconds", 86400))
-                                    link = await _ensure_cross_project_link(
-                                        project,
-                                        sender,
-                                        target_project_override,
-                                        target_agent,
-                                        ttl_seconds=ttl_seconds,
-                                        reason="auto-cross-project",
-                                    )
-                                    rec = (link, target_project_override, target_agent)
-                                except Exception:
-                                    rec = None
-                            elif len(global_matches) > 1:
-                                for proj, _agent in global_matches:
-                                    label = proj.human_key or proj.slug or "(unknown project)"
-                                    unknown_external[label].append(display_value or candidate.strip() or candidate)
-                                continue
-                    if rec:
-                        _link, target_project, target_agent = rec
-                        bucket = external.setdefault(
-                            target_project.id or 0,
-                            {"project": target_project, "to": [], "cc": [], "bcc": []},
-                        )
-                        bucket[kind].append(target_agent.name)
-                        continue
-
-                    if explicit_override:
-                        label = target_project_label or "(unknown project)"
-                        unknown_external[label].append(display_value or candidate.strip() or candidate)
+                            all_bcc.append(resolved)
                     else:
-                        unknown_local.add(display_value or candidate.strip() or candidate)
+                        unknown.add(display_value or raw.strip() if raw else raw)
 
-            try:
-                await _route(to, "to")
-                await _route(cc or [], "cc")
-                await _route(bcc or [], "bcc")
-            except _ContactBlocked as err:
-                raise ToolExecutionError(
-                    "CONTACT_BLOCKED",
-                    "Recipient is not accepting messages.",
-                    recoverable=True,
-                ) from err
+            await _route(to, "to")
+            await _route(cc or [], "cc")
+            await _route(bcc or [], "bcc")
 
-            if unknown_local or unknown_external:
-                # Auto-register missing local recipients if enabled
+            if unknown:
+                # Auto-register missing recipients if enabled
                 if getattr(settings_local, "messaging_auto_register_recipients", True):
-                    # Best effort: try to register any unknown local recipients with sane defaults
+                    # Best effort: try to register any unknown recipients with sane defaults
                     newly_registered: set[str] = set()
-                    for missing in list(unknown_local):
+                    for missing in list(unknown):
                         try:
                             _ = await _get_or_create_agent(
                                 project,
@@ -3323,174 +3230,46 @@ def build_mcp_server() -> FastMCP:
                             newly_registered.add(missing)
                         except Exception:
                             pass
-                    unknown_local.difference_update(newly_registered)
+                    unknown.difference_update(newly_registered)
                     # Re-run routing for any that were registered
                     if newly_registered:
-                        from contextlib import suppress
-                        with suppress(_ContactBlocked):
-                            await _route(list(newly_registered), "to")
-                # Attempt cross-project handshakes for unknown external recipients if allowed
-                attempted_external: list[str] = []
-                try:
-                    effective_auto_contact = bool(auto_contact_if_blocked or getattr(settings_local, "messaging_auto_handshake_on_block", True))
-                    if effective_auto_contact and unknown_external:
-                        from fastmcp.tools.tool import FunctionTool  # type: ignore
-                        handshake = cast(FunctionTool, cast(Any, macro_contact_handshake))
-                        # Iterate over a copy since we may mutate/resolve entries
-                        for label, names in list(unknown_external.items()):
-                            try:
-                                target_proj = await _get_project_by_identifier(label)
-                            except Exception:
-                                continue
-                            for nm in list(names):
-                                try:
-                                    await handshake.run(
-                                        {
-                                            "project_key": project.human_key,
-                                            "requester": sender.name,
-                                            "target": nm,
-                                            "to_project": target_proj.human_key or target_proj.slug,
-                                            "reason": "auto-handshake by send_message",
-                                            "auto_accept": True,
-                                            "ttl_seconds": int(settings_local.contact_auto_ttl_seconds),
-                                            "register_if_missing": True,
-                                        }
-                                    )
-                                    attempted_external.append(f"{nm}@{label}")
-                                except Exception:
-                                    pass
-                        # Re-route any that we attempted to handshake for
-                        if attempted_external:
-                            from contextlib import suppress
-                            with suppress(_ContactBlocked):
-                                for item in attempted_external:
-                                    await _route([item], "to")
-                            # Purge unknown_external entries that now have approved links
-                            try:
-                                async with get_session() as scheck:
-                                    for label, names in list(unknown_external.items()):
-                                        try:
-                                            tproj = await _get_project_by_identifier(label)
-                                        except Exception:
-                                            continue
-                                        remaining: list[str] = []
-                                        for nm in list(names):
-                                            lookup_value = (nm or "").strip().lower()
-                                            rows = await scheck.execute(
-                                                select(AgentLink, Project, Agent)
-                                                .join(Project, Project.id == AgentLink.b_project_id)
-                                                .join(Agent, Agent.id == AgentLink.b_agent_id)
-                                                .where(
-                                                    AgentLink.a_project_id == project.id,
-                                                    AgentLink.a_agent_id == sender.id,
-                                                    AgentLink.status == "approved",
-                                                    Project.id == tproj.id,
-                                                    func.lower(Agent.name) == lookup_value,
-                                                    cast(Any, Agent.is_active).is_(True),
-                                                )
-                                                .limit(1)
-                                            )
-                                            if rows.first() is None:
-                                                remaining.append(nm)
-                                        if remaining:
-                                            unknown_external[label] = remaining
-                                        else:
-                                            unknown_external.pop(label, None)
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-                # If everything resolved after auto-actions, skip error path
-                still_unknown = bool(unknown_local) or any(v for v in unknown_external.values())
-                if not still_unknown:
-                    # All unknowns were resolved; continue to delivery
-                    pass
-                else:
-                    parts: list[str] = []
-                data_payload: dict[str, Any] = {}
-                if still_unknown and unknown_local:
-                    missing_local = sorted({name for name in unknown_local if name})
-                    parts.append(
-                        f"local recipients {', '.join(missing_local)} are not registered in project '{project.human_key}'"
-                    )
-                    data_payload["unknown_local"] = missing_local
-                if still_unknown and unknown_external:
-                    formatted_external = {
-                        label: sorted({name for name in names if name})
-                        for label, names in unknown_external.items()
-                    }
-                    ext_parts = [
-                        f"{', '.join(names)} @ {label}"
-                        for label, names in sorted(formatted_external.items())
-                        if names
-                    ]
-                    if ext_parts:
-                        parts.append(
-                            "external recipients missing approved contact links: " + "; ".join(ext_parts)
-                        )
-                    data_payload["unknown_external"] = formatted_external
-                # Include auto actions we tried
-                if still_unknown and attempted_external:
-                    data_payload["auto_contact_attempted_external"] = attempted_external
-                if still_unknown:
-                    hint = f"Use resource://agents/{project.slug} to list registered agents or register new identities."
-                    parts.append(hint)
-                    message = "Unable to send message — " + "; ".join(parts)
-                    data_payload["hint"] = hint
-                    # Provide concrete fix suggestions
-                    try:
-                        suggestions: list[dict[str, Any]] = []
-                        for name in data_payload.get("unknown_local", [])[:5]:
-                            suggestions.append(
-                                {
-                                    "tool": "register_agent",
-                                    "arguments": {
-                                        "project_key": project.human_key,
-                                        "name": name,
-                                        "program": sender.program,
-                                        "model": sender.model,
-                                        "task_description": sender.task_description,
-                                    },
-                                }
-                            )
-                        for label, names in (data_payload.get("unknown_external", {}) or {}).items():
-                            for nm in names[:5]:
-                                suggestions.append(
-                                    {
-                                        "tool": "macro_contact_handshake",
-                                        "arguments": {
-                                            "project_key": project.human_key,
-                                            "requester": sender.name,
-                                            "target": nm,
-                                            "to_project": label,
-                                            "auto_accept": True,
-                                            "ttl_seconds": int(settings_local.contact_auto_ttl_seconds),
-                                            "register_if_missing": True,
-                                        },
-                                    }
-                                )
-                        if suggestions:
-                            data_payload["suggested_tool_calls"] = suggestions
-                    except Exception:
-                        pass
+                        await _route(list(newly_registered), "to")
+
+                # If still have unknown recipients, raise error
+                if unknown:
+                    missing_names = sorted({name for name in unknown if name})
+                    message = f"Recipients not found: {', '.join(missing_names)}"
                     await ctx.error(f"RECIPIENT_NOT_FOUND: {message}")
+                    suggestions: list[dict[str, Any]] = []
+                    for name in missing_names[:5]:
+                        suggestions.append(
+                            {
+                                "tool": "register_agent",
+                                "arguments": {
+                                    "project_key": project.human_key,
+                                    "name": name,
+                                    "program": sender.program,
+                                    "model": sender.model,
+                                    "task_description": sender.task_description,
+                                },
+                            }
+                        )
                     raise ToolExecutionError(
                         "RECIPIENT_NOT_FOUND",
                         message,
                         recoverable=True,
-                        data=data_payload,
+                        data={"unknown_recipients": missing_names, "suggested_tool_calls": suggestions},
                     )
 
-        deliveries: list[dict[str, Any]] = []
-        # Always record an outbox copy so replies can reference the thread even when all recipients are external
-        payload_local = await _deliver_message(
+        # Deliver message to all recipients (no project boundaries)
+        payload = await _deliver_message(
             ctx,
             "send_message",
             project,
             sender,
-            local_to,
-            local_cc,
-            local_bcc,
+            all_to,
+            all_cc,
+            all_bcc,
             subject,
             body_md,
             attachment_paths,
@@ -3498,45 +3277,21 @@ def build_mcp_server() -> FastMCP:
             importance,
             ack_required,
             thread_id,
-            allow_empty_recipients=not (local_to or local_cc or local_bcc),
+            allow_empty_recipients=not (all_to or all_cc or all_bcc),
         )
-        deliveries.append({"project": project.human_key, "payload": payload_local})
-        # External per-target project deliver (requires aliasing sender in target project)
-        for _pid, group in external.items():
-            p: Project = group["project"]
-            try:
-                alias = await _get_or_create_cross_project_alias(p, sender, settings_local)
-                payload_ext = await _deliver_message(
-                    ctx,
-                    "send_message",
-                    p,
-                    alias,
-                    group.get("to", []),
-                    group.get("cc", []),
-                    group.get("bcc", []),
-                    subject,
-                    body_md,
-                    attachment_paths,
-                    convert_images,
-                    importance,
-                    ack_required,
-                    thread_id,
-                )
-                deliveries.append({"project": p.human_key, "payload": payload_ext})
-            except Exception:
-                continue
 
-        # If a single delivery returned a structured error payload, bubble it up to top-level
-        if len(deliveries) == 1:
-            maybe_payload = deliveries[0].get("payload")
-            if isinstance(maybe_payload, dict) and isinstance(maybe_payload.get("error"), dict):
-                return {"error": maybe_payload["error"]}
-        result: dict[str, Any] = {"deliveries": deliveries, "count": len(deliveries)}
-        # Back-compat: expose top-level attachments when a single local delivery exists
-        if len(deliveries) == 1:
-            payload = deliveries[0].get("payload") or {}
-            if isinstance(payload, dict) and "attachments" in payload:
-                result["attachments"] = payload.get("attachments")
+        # If delivery returned a structured error payload, bubble it up
+        if isinstance(payload, dict) and isinstance(payload.get("error"), dict):
+            return {"error": payload["error"]}
+
+        # Maintain backward-compatible return format
+        result: dict[str, Any] = {
+            "deliveries": [{"project": project.human_key, "payload": payload}],
+            "count": 1,
+        }
+        # Expose attachments at top level if present
+        if isinstance(payload, dict) and "attachments" in payload:
+            result["attachments"] = payload.get("attachments")
         return result
 
     @mcp.tool(name="reply_message")
@@ -3620,10 +3375,9 @@ def build_mcp_server() -> FastMCP:
         ```
         """
         project = await _get_project_by_identifier(project_key)
-        sender = await _get_agent(project, sender_name)
-        settings_local = get_settings()
+        sender = await _get_agent_by_name(sender_name)
         original = await _get_message(project, message_id)
-        original_sender = await _get_agent_by_id(project, original.sender_id)
+        original_sender = await _get_agent_by_id_global(original.sender_id)
         thread_key = original.thread_id or str(original.id)
         subject_prefix_clean = subject_prefix.strip()
         base_subject = original.subject
@@ -3635,277 +3389,88 @@ def build_mcp_server() -> FastMCP:
         cc_list = cc or []
         bcc_list = bcc or []
 
-        local_to: list[str] = []
-        local_cc: list[str] = []
-        local_bcc: list[str] = []
-        external: dict[int, dict[str, Any]] = {}
+        # Simplified routing: all agents are global
+        all_to: list[str] = []
+        all_cc: list[str] = []
+        all_bcc: list[str] = []
 
         async with get_session() as sx:
+            # Preload ALL agent names globally
             existing = await sx.execute(
                 select(Agent.name).where(
-                    Agent.project_id == project.id,
                     cast(Any, Agent.is_active).is_(True),
                 )
             )
-            local_names = {row[0] for row in existing.fetchall()}
-            unknown_local: set[str] = set()
-            unknown_external: dict[str, list[str]] = defaultdict(list)
+            global_lookup: dict[str, str] = {}
+            for row in existing.fetchall():
+                canonical_name = (row[0] or "").strip()
+                if canonical_name:
+                    global_lookup[canonical_name.lower()] = canonical_name
 
-            class _ContactBlocked(Exception):
-                pass
+            unknown: set[str] = set()
 
             async def _route(name_list: list[str], kind: str) -> None:
+                """Simplified routing: look up agents globally by name."""
                 for raw in name_list:
-                    candidate = (raw or "").strip()
-                    if not candidate:
+                    name = (raw or "").strip()
+                    if not name:
                         continue
-                    nm = candidate
-                    explicit_override = False
-                    target_project_override: Project | None = None
-                    target_name_override: str | None = None
-                    if candidate.startswith("project:") and "#" in candidate:
-                        explicit_override = True
-                        try:
-                            _, rest = candidate.split(":", 1)
-                            slug_part, agent_part = rest.split("#", 1)
-                            target_project_override = await _get_project_by_identifier(slug_part.strip())
-                            target_name_override = agent_part.strip()
-                            nm = target_name_override or nm
-                        except Exception:
-                            unknown_external["(invalid project)"].append(candidate)
-                            continue
-                    elif "@" in candidate and not explicit_override:
-                        name_part, project_part = candidate.split("@", 1)
-                        if name_part.strip() and project_part.strip():
-                            explicit_override = True
-                            try:
-                                target_project_override = await _get_project_by_identifier(project_part.strip())
-                                target_name_override = name_part.strip()
-                                nm = target_name_override
-                            except Exception:
-                                label = project_part.strip() or "(invalid project)"
-                                unknown_external[label].append(candidate)
-                                continue
-                    if not explicit_override and nm in local_names:
-                        if kind == "to":
-                            local_to.append(nm)
-                        elif kind == "cc":
-                            local_cc.append(nm)
-                        else:
-                            local_bcc.append(nm)
-                        continue
-                    rows = None
-                    if target_project_override is not None and target_name_override:
-                        rows = await sx.execute(
-                            select(AgentLink, Project, Agent)
-                            .join(Project, Project.id == AgentLink.b_project_id)
-                            .join(Agent, Agent.id == AgentLink.b_agent_id)
-                            .where(
-                                AgentLink.a_project_id == project.id,
-                                AgentLink.a_agent_id == sender.id,
-                                AgentLink.status == "approved",
-                                Project.id == target_project_override.id,
-                                Agent.name == target_name_override,
-                                cast(Any, Agent.is_active).is_(True),
-                            )
-                            .limit(1)
-                        )
-                    else:
-                        rows = await sx.execute(
-                            select(AgentLink, Project, Agent)
-                            .join(Project, Project.id == AgentLink.b_project_id)
-                            .join(Agent, Agent.id == AgentLink.b_agent_id)
-                            .where(
-                                AgentLink.a_project_id == project.id,
-                                AgentLink.a_agent_id == sender.id,
-                                AgentLink.status == "approved",
-                                Agent.name == nm,
-                                cast(Any, Agent.is_active).is_(True),
-                            )
-                            .limit(1)
-                        )
-                    rec = rows.first()
-                    # Always allow auto cross-project linking (contact enforcement removed)
-                    if not rec:
-                        if explicit_override and target_project_override is not None:
-                            try:
-                                target_agent = await _get_or_create_agent(
-                                    target_project_override,
-                                    target_name_override,
-                                    sender.program,
-                                    sender.model,
-                                    sender.task_description,
-                                    settings_local,
-                                )
-                                ttl_seconds = int(getattr(settings_local, "contact_auto_ttl_seconds", 86400))
-                                link = await _ensure_cross_project_link(
-                                    project,
-                                    sender,
-                                    target_project_override,
-                                    target_agent,
-                                    ttl_seconds=ttl_seconds,
-                                    reason="auto-cross-project",
-                                )
-                                rec = (link, target_project_override, target_agent)
-                            except Exception:
-                                rec = None
-                        else:
-                            try:
-                                global_matches = [
-                                    (proj, agent)
-                                    for proj, agent in await _lookup_agents_any_project(nm)
-                                    if proj.id != project.id
-                                ]
-                            except Exception:
-                                global_matches = []
-                            if len(global_matches) == 1:
-                                target_project_override, target_agent = global_matches[0]
-                                try:
-                                    ttl_seconds = int(getattr(settings_local, "contact_auto_ttl_seconds", 86400))
-                                    link = await _ensure_cross_project_link(
-                                        project,
-                                        sender,
-                                        target_project_override,
-                                        target_agent,
-                                        ttl_seconds=ttl_seconds,
-                                        reason="auto-cross-project",
-                                    )
-                                    rec = (link, target_project_override, target_agent)
-                                except Exception:
-                                    rec = None
-                            elif len(global_matches) > 1:
-                                for proj, _agent in global_matches:
-                                    label = proj.human_key or proj.slug or "(unknown project)"
-                                    unknown_external.setdefault(label, []).append(nm)
-                                continue
-                    if rec:
-                        _link, target_project, target_agent = rec
-                        bucket = external.setdefault(target_project.id or 0, {"project": target_project, "to": [], "cc": [], "bcc": []})
-                        bucket[kind].append(target_agent.name)
-                    else:
-                        # No link found - add to unknown recipients for later validation
-                        if explicit_override:
-                            label = (
-                                target_project_override.human_key or target_project_override.slug
-                                if target_project_override
-                                else "(unknown project)"
-                            )
-                            unknown_external[label].append(candidate)
-                        else:
-                            unknown_local.add(candidate)
 
-        try:
+                    # Look up agent globally by name
+                    resolved = global_lookup.get(name.lower())
+                    if resolved:
+                        if kind == "to":
+                            all_to.append(resolved)
+                        elif kind == "cc":
+                            all_cc.append(resolved)
+                        else:
+                            all_bcc.append(resolved)
+                    else:
+                        unknown.add(name)
+
             await _route(to_names, "to")
             await _route(cc_list, "cc")
             await _route(bcc_list, "bcc")
-        except _ContactBlocked:
-            return {"error": {"type": "CONTACT_BLOCKED", "message": "Recipient is not accepting messages."}}
 
-        # Validate all recipients were resolved
-        if unknown_local or unknown_external:
-            parts: list[str] = []
-            data_payload: dict[str, Any] = {}
-            if unknown_local:
-                missing_local = sorted({name for name in unknown_local if name})
-                parts.append(
-                    f"local recipients {', '.join(missing_local)} are not registered in project '{project.human_key}'"
+            # Validate all recipients were resolved
+            if unknown:
+                missing_names = sorted({name for name in unknown if name})
+                message = f"Recipients not found: {', '.join(missing_names)}"
+                raise ToolExecutionError(
+                    "RECIPIENT_UNKNOWN",
+                    message,
+                    recoverable=True,
+                    data={"unknown_recipients": missing_names},
                 )
-                data_payload["unknown_local"] = missing_local
-            if unknown_external:
-                formatted_external = {
-                    label: sorted({name for name in names if name})
-                    for label, names in unknown_external.items()
-                }
-                ext_parts = [
-                    f"{', '.join(names)} @ {label}"
-                    for label, names in sorted(formatted_external.items())
-                    if names
-                ]
-                if ext_parts:
-                    parts.append(
-                        "external recipients missing approved contact links: " + "; ".join(ext_parts)
-                    )
-                data_payload["unknown_external"] = formatted_external
-            hint = f"Use resource://agents/{project.slug} to list registered agents or register new identities."
-            parts.append(hint)
-            message = "Unable to send reply — " + "; ".join(parts)
-            raise ToolExecutionError(
-                "RECIPIENT_UNKNOWN",
-                message,
-                recoverable=True,
-                data=data_payload,
-            )
 
-        deliveries: list[dict[str, Any]] = []
-        if local_to or local_cc or local_bcc:
-            payload_local = await _deliver_message(
-                ctx,
-                "reply_message",
-                project,
-                sender,
-                local_to,
-                local_cc,
-                local_bcc,
-                reply_subject,
-                body_md,
-                None,
-                None,
-                importance=original.importance,
-                ack_required=original.ack_required,
-                thread_id=thread_key,
-            )
-            deliveries.append({"project": project.human_key, "payload": payload_local})
+        # Deliver reply to all recipients (no project boundaries)
+        payload = await _deliver_message(
+            ctx,
+            "reply_message",
+            project,
+            sender,
+            all_to,
+            all_cc,
+            all_bcc,
+            reply_subject,
+            body_md,
+            None,
+            None,
+            importance=original.importance,
+            ack_required=original.ack_required,
+            thread_id=thread_key,
+        )
 
-        for _pid, group in external.items():
-            target_project: Project = group["project"]
-            try:
-                alias = await _get_or_create_agent(
-                    target_project,
-                    sender.name,
-                    sender.program,
-                    sender.model,
-                    sender.task_description,
-                    settings_local,
-                )
-                payload_ext = await _deliver_message(
-                    ctx,
-                    "reply_message",
-                    target_project,
-                    alias,
-                    group.get("to", []),
-                    group.get("cc", []),
-                    group.get("bcc", []),
-                    reply_subject,
-                    body_md,
-                    None,
-                    None,
-                    importance=original.importance,
-                    ack_required=original.ack_required,
-                    thread_id=thread_key,
-                )
-                deliveries.append({"project": target_project.human_key, "payload": payload_ext})
-            except Exception:
-                continue
-
-        if not deliveries:
-            return {
-                "thread_id": thread_key,
-                "reply_to": message_id,
-                "deliveries": [],
-                "count": 0,
-            }
-
-        base_payload = deliveries[0].get("payload") or {}
-        primary_payload = dict(base_payload) if isinstance(base_payload, dict) else {}
-        primary_payload.setdefault("thread_id", thread_key)
-        primary_payload["reply_to"] = message_id
-        primary_payload["deliveries"] = deliveries
-        primary_payload["count"] = len(deliveries)
-        if len(deliveries) == 1:
-            attachments = base_payload.get("attachments") if isinstance(base_payload, dict) else None
-            if attachments is not None:
-                primary_payload.setdefault("attachments", attachments)
-        return primary_payload
+        # Maintain backward-compatible return format
+        deliveries = [{"project": project.human_key, "payload": payload}]
+        result = dict(payload) if isinstance(payload, dict) else {}
+        result["thread_id"] = thread_key
+        result["reply_to"] = message_id
+        result["deliveries"] = deliveries
+        result["count"] = 1
+        if isinstance(payload, dict) and "attachments" in payload:
+            result.setdefault("attachments", payload.get("attachments"))
+        return result
 
     @mcp.tool(name="request_contact")
     @_instrument_tool(
@@ -4187,6 +3752,10 @@ def build_mcp_server() -> FastMCP:
         """
         Retrieve recent messages for an agent without mutating read/ack state.
 
+        NOTE: Agent names are globally unique. The project_key parameter is informational only
+        and does not affect message retrieval. Agents can see all messages sent to them
+        regardless of which project_key is used in the fetch call.
+
         Filters
         -------
         - `urgent_only`: only messages with importance in {high, urgent}
@@ -4224,8 +3793,9 @@ def build_mcp_server() -> FastMCP:
             except Exception:
                 pass
         try:
+            # project_key is now informational only - agents are looked up globally
             project = await _get_project_by_identifier(project_key)
-            agent = await _get_agent(project, agent_name)
+            agent = await _get_agent_by_name(agent_name)
             items = await _list_inbox(project, agent, limit, urgent_only, include_bodies, since_ts)
             await ctx.info(f"Fetched {len(items)} messages for '{agent.name}'. urgent_only={urgent_only}")
             return items
