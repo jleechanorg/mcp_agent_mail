@@ -41,7 +41,8 @@ def _seed_mailbox(db_path: Path, storage_root: Path) -> None:
                 id INTEGER PRIMARY KEY,
                 project_id INTEGER,
                 name TEXT,
-                contact_policy TEXT DEFAULT 'auto'
+                is_active INTEGER DEFAULT 1,
+                deleted_ts TEXT
             );
             CREATE TABLE messages (
                 id INTEGER PRIMARY KEY,

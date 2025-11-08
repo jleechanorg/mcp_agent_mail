@@ -39,7 +39,6 @@ class Agent(SQLModel, table=True):
     inception_ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_active_ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     attachments_policy: str = Field(default="auto", max_length=16)
-    contact_policy: str = Field(default="auto", max_length=16)  # open | auto | contacts_only | block_all
     is_active: bool = Field(default=True)
     deleted_ts: Optional[datetime] = Field(default=None)
 
@@ -84,27 +83,6 @@ class FileReservation(SQLModel, table=True):
     created_ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     expires_ts: datetime
     released_ts: Optional[datetime] = None
-
-
-class AgentLink(SQLModel, table=True):
-    """Directed contact link request from agent A to agent B.
-
-    When approved, messages may be sent cross-project between A and B.
-    """
-
-    __tablename__ = "agent_links"
-    __table_args__ = (UniqueConstraint("a_project_id", "a_agent_id", "b_project_id", "b_agent_id", name="uq_agentlink_pair"),)
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    a_project_id: int = Field(foreign_key="projects.id", index=True)
-    a_agent_id: int = Field(foreign_key="agents.id", index=True)
-    b_project_id: int = Field(foreign_key="projects.id", index=True)
-    b_agent_id: int = Field(foreign_key="agents.id", index=True)
-    status: str = Field(default="pending", max_length=16)  # pending | approved | blocked
-    reason: str = Field(default="", max_length=512)
-    created_ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    expires_ts: Optional[datetime] = None
 
 
 class ProjectSiblingSuggestion(SQLModel, table=True):

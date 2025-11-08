@@ -180,57 +180,6 @@ Result: Complete isolation between client projects.
 
 **Important:** Agents in separate projects **cannot** currently communicate. This is by design for security and privacy.
 
-## Future: Cross-Project Coordination Features
-
-The following features are **planned** but **not yet implemented**:
-
-### 1. Cross-Project Agent Links
-
-Future capability to establish links between agents in different projects:
-
-```json
-// FUTURE - NOT YET AVAILABLE
-{
-  "tool": "request_contact",
-  "arguments": {
-    "project_key": "/data/projects/frontend",
-    "from_agent": "FrontendDev",
-    "to_agent": "BackendDev",
-    "to_project": "/data/projects/backend"  // ← Cross-project
-  }
-}
-```
-
-### 2. Cross-Project Message Routing
-
-Future capability to send messages across project boundaries:
-
-```json
-// FUTURE - NOT YET AVAILABLE
-{
-  "tool": "send_message",
-  "arguments": {
-    "project_key": "/data/projects/frontend",
-    "sender_name": "FrontendDev",
-    "to": ["BackendDev@/data/projects/backend"],  // ← Cross-project addressing
-    "subject": "API contract discussion"
-  }
-}
-```
-
-### 3. Federated Agent Directory
-
-Future capability to discover agents across multiple projects:
-
-```json
-// FUTURE - NOT YET AVAILABLE
-{
-  "resource": "resource://agents?scope=all"
-}
-
-// Would return agents from all projects the current agent has access to
-```
-
 ## Migration Guide
 
 If you currently have agents in separate projects that need to coordinate, here's how to migrate:
@@ -547,7 +496,6 @@ Re-register all agents in a single shared project (see Migration Guide above).
 **Common causes:**
 1. Agents in different projects
 2. Wrong recipient name (typo)
-3. Message filtered by contact policy
 
 ## Summary
 
@@ -557,11 +505,6 @@ Re-register all agents in a single shared project (see Migration Guide above).
 - ✅ Register all agents in the same project
 - ✅ Use file reservations to signal editing intent and avoid conflicts
 - ✅ Use threads to organize related discussions
-
-**Future:**
-- ⏳ Cross-project messaging (planned)
-- ⏳ Federated agent directory (planned)
-- ⏳ Cross-project file reservations (planned)
 
 **When in doubt:**
 - If agents need to coordinate → Same project

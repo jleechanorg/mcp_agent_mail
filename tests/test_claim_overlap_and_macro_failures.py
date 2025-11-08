@@ -20,16 +20,5 @@ async def test_file_reservation_overlap_conflict_path(isolated_env):
         assert res2.data["granted"] and res2.data["conflicts"]
 
 
-@pytest.mark.asyncio
-async def test_macro_contact_handshake_welcome_failure_nonfatal(isolated_env, monkeypatch):
-    server = build_mcp_server()
-    async with Client(server) as client:
-        await client.call_tool("ensure_project", {"human_key": "/backend"})
-        await client.call_tool("register_agent", {"project_key": "Backend", "program": "p", "model": "m", "name": "RedStone"})
-        await client.call_tool("register_agent", {"project_key": "Backend", "program": "p", "model": "m", "name": "WhiteCat"})
-        result = await client.call_tool(
-            "macro_contact_handshake",
-            {"project_key": "Backend", "requester": "RedStone", "target": "WhiteCat", "auto_accept": True, "welcome_subject": "Hi", "welcome_body": "Welcome"},
-        )
-        assert "request" in result.data and "response" in result.data
+# Test removed: macro_contact_handshake tool has been deleted from the codebase
 
