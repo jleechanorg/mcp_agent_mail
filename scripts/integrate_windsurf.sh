@@ -76,6 +76,7 @@ AUTH_HEADER_LINE=''  # localhost may allow unauthenticated; include if token pre
 if [[ -n "${_TOKEN}" ]]; then
   AUTH_HEADER_LINE="      \"headers\": { \"Authorization\": \"Bearer ${_TOKEN}\" },"
 fi
+OPTIONS_BLOCK='      "options": { "timeoutSeconds": 180, "initTimeoutSeconds": 30 },'
 write_atomic "$OUT_JSON" <<JSON
 {
   "mcpServers": {
@@ -84,6 +85,7 @@ write_atomic "$OUT_JSON" <<JSON
       "url": "${_URL}",
       "core": true,
 ${AUTH_HEADER_LINE}
+${OPTIONS_BLOCK}
       "note": "Import or configure this server in Windsurf's MCP settings"
     }
   }
@@ -169,4 +171,3 @@ else
   _print "  - Header: (optional on localhost if server allows)"
 fi
 _print "Then start the server with: ${RUN_HELPER}"
-
