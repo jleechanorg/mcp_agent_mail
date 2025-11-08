@@ -71,7 +71,11 @@ write_atomic "$OUT_JSON" <<JSON
       "type": "http",
       "url": "${_URL}",
       "core": true,
-      "headers": {${AUTH_HEADER_LINE}}
+      "headers": {${AUTH_HEADER_LINE}},
+      "options": {
+        "timeoutSeconds": 180,
+        "initTimeoutSeconds": 30
+      }
     }
   }
 }
@@ -125,7 +129,11 @@ write_atomic "$HOME_CURSOR_JSON" <<JSON
     "mcp-agent-mail": {
       "type": "http",
       "url": "${_URL}",
-      "core": true
+      "core": true,
+      "options": {
+        "timeoutSeconds": 180,
+        "initTimeoutSeconds": 30
+      }
     }
   }
 }
