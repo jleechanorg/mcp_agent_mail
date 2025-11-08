@@ -70,6 +70,7 @@ write_atomic "$OUT_JSON" <<JSON
     "mcp-agent-mail": {
       "type": "http",
       "url": "${_URL}",
+      "core": true,
       "headers": {${AUTH_HEADER_LINE}}
     }
   }
@@ -123,7 +124,8 @@ write_atomic "$HOME_CURSOR_JSON" <<JSON
   "mcpServers": {
     "mcp-agent-mail": {
       "type": "http",
-      "url": "${_URL}"
+      "url": "${_URL}",
+      "core": true
     }
   }
 }
@@ -169,4 +171,3 @@ else
     log_warn "Failed to register agent (server may be starting)"
   fi
 fi
-

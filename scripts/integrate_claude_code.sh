@@ -93,20 +93,41 @@ write_atomic "$SETTINGS_PATH" <<JSON
     "mcp-agent-mail": {
       "type": "http",
       "url": "${_URL}",
+      "core": true,
       "headers": {${AUTH_HEADER_LINE}}
     }
   },
   "hooks": {
     "SessionStart": [
-      { "type": "command", "command": "uv run python -m mcp_agent_mail.cli file_reservations active ${_PROJ}" },
-      { "type": "command", "command": "uv run python -m mcp_agent_mail.cli acks pending ${_PROJ} ${_AGENT} --limit 20" }
+      {
+        "matcher": {},
+        "hooks": [
+          { "type": "command", "command": "uv run python -m mcp_agent_mail.cli file_reservations active ${_PROJ}" },
+          { "type": "command", "command": "uv run python -m mcp_agent_mail.cli acks pending ${_PROJ} ${_AGENT} --limit 20" }
+        ]
+      }
     ],
     "PreToolUse": [
-      { "matcher": "Edit", "hooks": [ { "type": "command", "command": "uv run python -m mcp_agent_mail.cli file_reservations soon ${_PROJ} --minutes 10" } ] }
+      {
+        "matcher": { "tools": ["Edit"] },
+        "hooks": [
+          { "type": "command", "command": "uv run python -m mcp_agent_mail.cli file_reservations soon ${_PROJ} --minutes 10" }
+        ]
+      }
     ],
     "PostToolUse": [
-      { "matcher": { "tool": "send_message" }, "hooks": [ { "type": "command", "command": "uv run python -m mcp_agent_mail.cli list-acks --project ${_PROJ} --agent ${_AGENT} --limit 10" } ] },
-      { "matcher": { "tool": "file_reservation_paths" }, "hooks": [ { "type": "command", "command": "uv run python -m mcp_agent_mail.cli file_reservations list ${_PROJ}" } ] }
+      {
+        "matcher": { "tools": ["send_message"] },
+        "hooks": [
+          { "type": "command", "command": "uv run python -m mcp_agent_mail.cli list-acks --project ${_PROJ} --agent ${_AGENT} --limit 10" }
+        ]
+      },
+      {
+        "matcher": { "tools": ["file_reservation_paths"] },
+        "hooks": [
+          { "type": "command", "command": "uv run python -m mcp_agent_mail.cli file_reservations list ${_PROJ}" }
+        ]
+      }
     ]
   }
 }
@@ -127,20 +148,41 @@ write_atomic "$LOCAL_SETTINGS_PATH" <<JSON
     "mcp-agent-mail": {
       "type": "http",
       "url": "${_URL}",
+      "core": true,
       "headers": {${AUTH_HEADER_LINE}}
     }
   },
   "hooks": {
     "SessionStart": [
-      { "type": "command", "command": "uv run python -m mcp_agent_mail.cli file_reservations active ${_PROJ}" },
-      { "type": "command", "command": "uv run python -m mcp_agent_mail.cli acks pending ${_PROJ} ${_AGENT} --limit 20" }
+      {
+        "matcher": {},
+        "hooks": [
+          { "type": "command", "command": "uv run python -m mcp_agent_mail.cli file_reservations active ${_PROJ}" },
+          { "type": "command", "command": "uv run python -m mcp_agent_mail.cli acks pending ${_PROJ} ${_AGENT} --limit 20" }
+        ]
+      }
     ],
     "PreToolUse": [
-      { "matcher": "Edit", "hooks": [ { "type": "command", "command": "uv run python -m mcp_agent_mail.cli file_reservations soon ${_PROJ} --minutes 10" } ] }
+      {
+        "matcher": { "tools": ["Edit"] },
+        "hooks": [
+          { "type": "command", "command": "uv run python -m mcp_agent_mail.cli file_reservations soon ${_PROJ} --minutes 10" }
+        ]
+      }
     ],
     "PostToolUse": [
-      { "matcher": { "tool": "send_message" }, "hooks": [ { "type": "command", "command": "uv run python -m mcp_agent_mail.cli list-acks --project ${_PROJ} --agent ${_AGENT} --limit 10" } ] },
-      { "matcher": { "tool": "file_reservation_paths" }, "hooks": [ { "type": "command", "command": "uv run python -m mcp_agent_mail.cli file_reservations list ${_PROJ}" } ] }
+      {
+        "matcher": { "tools": ["send_message"] },
+        "hooks": [
+          { "type": "command", "command": "uv run python -m mcp_agent_mail.cli list-acks --project ${_PROJ} --agent ${_AGENT} --limit 10" }
+        ]
+      },
+      {
+        "matcher": { "tools": ["file_reservation_paths"] },
+        "hooks": [
+          { "type": "command", "command": "uv run python -m mcp_agent_mail.cli file_reservations list ${_PROJ}" }
+        ]
+      }
     ]
   }
 }
@@ -170,7 +212,7 @@ if command -v jq >/dev/null 2>&1; then
 
   umask 077  # Bug 1 fix: secure permissions for temp file
   if jq --arg url "${_URL}" --arg token "${_TOKEN}" \
-      '.mcpServers = (.mcpServers // {}) | .mcpServers["mcp-agent-mail"] = {"type":"http","url":$url,"headers":{"Authorization": ("Bearer " + $token)}}' \
+      '.mcpServers = (.mcpServers // {}) | .mcpServers["mcp-agent-mail"] = {"type":"http","url":$url,"core":true,"headers":{"Authorization": ("Bearer " + $token)}}' \
       "$HOME_SETTINGS_PATH" > "$TMP_MERGE"; then
     # Bug 3 fix: Check mv separately
     if mv "$TMP_MERGE" "$HOME_SETTINGS_PATH"; then
@@ -196,8 +238,42 @@ else
     "mcp-agent-mail": {
       "type": "http",
       "url": "${_URL}",
+      "core": true,
       "headers": {${AUTH_HEADER_LINE}}
     }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": {},
+        "hooks": [
+          { "type": "command", "command": "uv run python -m mcp_agent_mail.cli file_reservations active ${_PROJ}" },
+          { "type": "command", "command": "uv run python -m mcp_agent_mail.cli acks pending ${_PROJ} ${_AGENT} --limit 20" }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": { "tools": ["Edit"] },
+        "hooks": [
+          { "type": "command", "command": "uv run python -m mcp_agent_mail.cli file_reservations soon ${_PROJ} --minutes 10" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": { "tools": ["send_message"] },
+        "hooks": [
+          { "type": "command", "command": "uv run python -m mcp_agent_mail.cli list-acks --project ${_PROJ} --agent ${_AGENT} --limit 10" }
+        ]
+      },
+      {
+        "matcher": { "tools": ["file_reservation_paths"] },
+        "hooks": [
+          { "type": "command", "command": "uv run python -m mcp_agent_mail.cli file_reservations list ${_PROJ}" }
+        ]
+      }
+    ]
   }
 }
 JSON
@@ -286,4 +362,3 @@ else
 fi
 
 log_ok "==> Done."; _print "Open your project in Claude Code; it should auto-detect the project-level .claude/settings.json."
-

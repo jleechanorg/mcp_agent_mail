@@ -3,7 +3,7 @@ set -euo pipefail
 
 # MCP Agent Mail — TL;DR installer
 # - Installs uv (if missing)
-# - Sets up Python 3.14 venv with uv
+# - Sets up Python 3.11+ venv with uv
 # - Syncs dependencies
 # - Runs auto-detect integration and starts the HTTP server on port 8765
 #
@@ -127,10 +127,10 @@ ensure_repo() {
 }
 
 ensure_python_and_venv() {
-  info "Ensuring Python 3.14 and project venv (.venv)"
-  uv python install 3.14
+  info "Ensuring Python 3.11+ and project venv (.venv)"
+  uv python install 3.11
   if [[ ! -d "${REPO_DIR}/.venv" ]]; then
-    (cd "${REPO_DIR}" && uv venv -p 3.14)
+    (cd "${REPO_DIR}" && uv venv -p 3.11)
     ok "Created venv at ${REPO_DIR}/.venv"
   else
     ok "Found existing venv at ${REPO_DIR}/.venv"
@@ -258,5 +258,4 @@ main() {
 }
 
 main "$@"
-
 

@@ -7,7 +7,7 @@ import importlib
 import inspect
 from typing import Any, cast
 
-# Python 3.14 warns when third-party code calls asyncio.iscoroutinefunction.
+# Python 3.11+ warns when third-party code calls asyncio.iscoroutinefunction.
 # Patch it globally to the inspect implementation before importing submodules.
 asyncio.iscoroutinefunction = inspect.iscoroutinefunction  # type: ignore[attr-defined]
 
