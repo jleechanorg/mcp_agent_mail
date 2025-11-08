@@ -23,7 +23,7 @@ from urllib.parse import parse_qsl
 from fastmcp import Context, FastMCP
 from git import Repo
 from git.exc import InvalidGitRepositoryError, NoSuchPathError
-from sqlalchemy import asc, desc, func, or_, select, text, update
+from sqlalchemy import asc, delete, desc, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError, NoResultFound
 from sqlalchemy.orm import aliased
 
@@ -40,6 +40,7 @@ from .storage import (
     ensure_archive,
     heal_archive_locks,
     process_attachments,
+    write_agent_deletion_marker,
     write_agent_profile,
     write_file_reservation_record,
     write_message_bundle,
@@ -1283,6 +1284,86 @@ async def _get_or_create_agent(
     return agent
 
 
+async def _delete_agent(project: Project, name: str, settings: Settings) -> dict[str, Any]:
+    """Delete an agent and all related records from the database.
+
+    This function:
+    1. Deletes the agent from the agents table
+    2. Deletes associated MessageRecipient records
+    3. Deletes messages sent by the agent
+    4. Deletes file reservations held by the agent
+    5. Writes a deletion marker to the Git archive
+
+    Returns a dict with deletion statistics.
+    """
+    if project.id is None:
+        raise ValueError("Project must have an id before deleting agents.")
+
+    await ensure_schema()
+
+    # First, get the agent to ensure it exists
+    agent = await _get_agent(project, name)
+    if agent.id is None:
+        raise ValueError("Agent must have an id before deletion.")
+
+    agent_id = agent.id
+    agent_name = agent.name
+
+    stats = {
+        "agent_id": agent_id,
+        "agent_name": agent_name,
+        "project": project.human_key,
+        "message_recipients_deleted": 0,
+        "messages_deleted": 0,
+        "file_reservations_deleted": 0,
+    }
+
+    async with get_session() as session, session.begin():
+        # Subquery of messages authored by this agent (keeps work in DB; avoids param limits)
+        msg_ids_subq = select(Message.id).where(
+            Message.sender_id == agent_id,
+            Message.project_id == project.id,
+        )
+
+        # 1) Delete MessageRecipient records where this agent is the recipient
+        res1 = await session.execute(
+            delete(MessageRecipient).where(MessageRecipient.agent_id == agent_id)
+        )
+        stats["message_recipients_deleted"] = int(res1.rowcount or 0)
+
+        # 2) Delete MessageRecipient records for messages authored by this agent
+        #    (Must be done BEFORE deleting the messages to avoid FK violations)
+        res2 = await session.execute(
+            delete(MessageRecipient).where(
+                cast(Any, MessageRecipient.message_id).in_(msg_ids_subq)
+            )
+        )
+        stats["message_recipients_deleted"] += int(res2.rowcount or 0)
+
+        # 3) Now safe to delete messages sent by the agent
+        res3 = await session.execute(
+            delete(Message).where(Message.sender_id == agent_id)
+        )
+        stats["messages_deleted"] = int(res3.rowcount or 0)
+
+        # 4) Delete file reservations
+        res4 = await session.execute(
+            delete(FileReservation).where(FileReservation.agent_id == agent_id)
+        )
+        stats["file_reservations_deleted"] = int(res4.rowcount or 0)
+
+        # 5) Finally, delete the agent itself
+        await session.execute(delete(Agent).where(Agent.id == agent_id))
+
+    # Write deletion marker to Git archive
+    archive = await ensure_archive(settings, project.slug)
+    async with _archive_write_lock(archive):
+        await write_agent_deletion_marker(archive, agent_name, stats)
+
+    return stats
+
+
+
 async def _lookup_agents_any_project(name: str, include_inactive: bool = False) -> list[tuple[Project, Agent]]:
     """Return all (project, agent) pairs matching a given agent name globally."""
 
@@ -2149,6 +2230,7 @@ CORE_TOOLS = {
 # Extended tools (~16k tokens): Advanced features available via meta-tools
 EXTENDED_TOOLS = {
     "create_agent_identity",
+    "delete_agent",
     "acknowledge_message",
     "search_messages",
     "file_reservation_paths",
@@ -2169,6 +2251,7 @@ EXTENDED_TOOL_METADATA = {
     "acknowledge_message": {"category": "messaging", "description": "Acknowledge a message (sets both read_ts and ack_ts)"},
     "search_messages": {"category": "search", "description": "Full-text search over subject and body"},
     "create_agent_identity": {"category": "identity", "description": "Create a new unique agent identity"},
+    "delete_agent": {"category": "identity", "description": "Permanently delete an agent and related records (destructive, irreversible)"},
     "file_reservation_paths": {"category": "file_reservations", "description": "Reserve file paths/globs for exclusive or shared access"},
     "release_file_reservations": {"category": "file_reservations", "description": "Release active file reservations"},
     "force_release_file_reservation": {"category": "file_reservations", "description": "Force-release stale reservation from another agent"},
@@ -2710,6 +2793,73 @@ def build_mcp_server() -> FastMCP:
                     agent = db_agent
         await ctx.info(f"Registered agent '{agent.name}' for project '{project.human_key}'.")
         return _agent_to_dict(agent)
+
+    @mcp.tool(name="delete_agent")
+    @_instrument_tool("delete_agent", cluster=CLUSTER_IDENTITY, capabilities={"identity"}, agent_arg="name", project_arg="project_key")
+    async def delete_agent(
+        ctx: Context,
+        project_key: str,
+        name: str,
+    ) -> dict[str, Any]:
+        """
+        Delete an agent and all associated data from the system.
+
+        When to use
+        -----------
+        - When an agent is no longer needed and should be permanently removed.
+        - To clean up test agents or obsolete agent identities.
+
+        Semantics
+        ---------
+        - Deletes the agent from the database
+        - Deletes all messages sent by the agent
+        - Deletes all message recipient records for the agent
+        - Deletes all file reservations held by the agent
+        - Writes a deletion marker to the Git archive at agents/<Name>/deleted.json
+
+        WARNING
+        -------
+        This operation is DESTRUCTIVE and IRREVERSIBLE. All messages and reservations
+        associated with this agent will be permanently deleted from the database.
+        A deletion marker will be preserved in the Git archive for audit purposes.
+
+        Parameters
+        ----------
+        project_key : str
+            Any string identifier for the project containing the agent.
+        name : str
+            The exact name of the agent to delete (case-insensitive).
+
+        Returns
+        -------
+        dict
+            Deletion statistics including:
+            - agent_id: The ID of the deleted agent
+            - agent_name: The name of the deleted agent
+            - project: The project human_key
+            - message_recipients_deleted: Number of recipient records deleted
+            - messages_deleted: Number of messages deleted
+            - file_reservations_deleted: Number of file reservations deleted
+
+        Examples
+        --------
+        Delete an agent:
+        ```json
+        {"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"delete_agent","arguments":{
+          "project_key":"/data/projects/backend","name":"BlueLake"
+        }}}
+        ```
+
+        Pitfalls
+        --------
+        - This operation cannot be undone. The agent and all associated data will be permanently deleted.
+        - If the agent doesn't exist, a NoResultFound error will be raised.
+        - Other agents' messages TO this agent will have their recipient records deleted but the messages themselves remain.
+        """
+        project = await _get_project_by_identifier(project_key)
+        stats = await _delete_agent(project, name, settings)
+        await ctx.info(f"Deleted agent '{name}' from project '{project.human_key}'.")
+        return stats
 
     @mcp.tool(name="whois")
     @_instrument_tool("whois", cluster=CLUSTER_IDENTITY, capabilities={"identity", "audit"}, project_arg="project_key", agent_arg="agent_name")
@@ -6049,6 +6199,7 @@ def build_mcp_server() -> FastMCP:
     _EXTENDED_TOOL_REGISTRY.update({
         "acknowledge_message": acknowledge_message,
         "create_agent_identity": create_agent_identity,
+        "delete_agent": delete_agent,
         "search_messages": search_messages,
         "file_reservation_paths": file_reservation_paths,
         "release_file_reservations": release_file_reservations_tool,

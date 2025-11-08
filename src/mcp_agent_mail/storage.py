@@ -334,10 +334,70 @@ async def _ensure_repo(root: Path, settings: Settings) -> Repo:
 
 
 async def write_agent_profile(archive: ProjectArchive, agent: dict[str, object]) -> None:
-    profile_path = archive.root / "agents" / agent["name"].__str__() / "profile.json"
+    agent_name = agent["name"].__str__()
+    # Sanitize agent_name to prevent path traversal
+    # Check for path separators before normalization to give clear error messages
+    if (
+        not agent_name
+        or "/" in agent_name
+        or "\\" in agent_name
+        or agent_name.startswith(".")
+        or agent_name == ".."
+    ):
+        raise ValueError(f"Invalid agent name: {agent_name!r}")
+
+    # Additional normalization for platform consistency
+    normalized = agent_name.replace("\\", "/")
+    if (
+        not normalized
+        or normalized.startswith("/")
+        or normalized.startswith("..")
+        or "/../" in normalized
+        or normalized.endswith("/..")
+        or normalized == ".."
+    ):
+        raise ValueError(f"Invalid agent name: {agent_name!r}")
+
+    profile_path = archive.root / "agents" / agent_name / "profile.json"
     await _write_json(profile_path, agent)
     rel = profile_path.relative_to(archive.repo_root).as_posix()
-    await _commit(archive.repo, archive.settings, f"agent: profile {agent['name']}", [rel])
+    await _commit(archive.repo, archive.settings, f"agent: profile {agent_name}", [rel])
+
+
+async def write_agent_deletion_marker(archive: ProjectArchive, agent_name: str, deletion_stats: dict[str, object]) -> None:
+    """Write a deletion marker to the Git archive for an agent."""
+    # Sanitize agent_name to prevent path traversal
+    # Check for path separators before normalization to give clear error messages
+    if (
+        not agent_name
+        or "/" in agent_name
+        or "\\" in agent_name
+        or agent_name.startswith(".")
+        or agent_name == ".."
+    ):
+        raise ValueError(f"Invalid agent name: {agent_name!r}")
+
+    # Additional normalization for platform consistency
+    normalized = agent_name.replace("\\", "/")
+    if (
+        not normalized
+        or normalized.startswith("/")
+        or normalized.startswith("..")
+        or "/../" in normalized
+        or normalized.endswith("/..")
+        or normalized == ".."
+    ):
+        raise ValueError(f"Invalid agent name: {agent_name!r}")
+
+    deletion_marker = {
+        "name": agent_name,
+        "deleted_at": datetime.now(timezone.utc).isoformat(),
+        "deletion_stats": deletion_stats,
+    }
+    marker_path = archive.root / "agents" / agent_name / "deleted.json"
+    await _write_json(marker_path, deletion_marker)
+    rel = marker_path.relative_to(archive.repo_root).as_posix()
+    await _commit(archive.repo, archive.settings, f"agent: delete {agent_name}", [rel])
 
 
 async def write_file_reservation_record(archive: ProjectArchive, file_reservation: dict[str, object]) -> None:
