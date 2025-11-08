@@ -471,6 +471,34 @@ kill_pids_graceful() {
   done
 }
 
+# Load or generate HTTP_BEARER_TOKEN
+# Searches common config locations, falls back to generating a new token
+# Sets the HTTP_BEARER_TOKEN environment variable
+# Usage: load_or_generate_bearer_token [python_bin]
+#   python_bin: optional Python binary path (default: python3)
+load_or_generate_bearer_token() {
+  local python_bin="${1:-python3}"
+  
+  # Check if token is already set in environment
+  if [[ -n "${HTTP_BEARER_TOKEN:-}" ]]; then
+    return 0
+  fi
+  
+  # Try loading from common .env file locations
+  if [[ -f ~/.config/mcp-agent-mail/.env ]]; then
+    HTTP_BEARER_TOKEN=$(grep -E '^HTTP_BEARER_TOKEN=' ~/.config/mcp-agent-mail/.env | sed -E 's/^HTTP_BEARER_TOKEN=//') || true
+  elif [[ -f ~/mcp_agent_mail/.env ]]; then
+    HTTP_BEARER_TOKEN=$(grep -E '^HTTP_BEARER_TOKEN=' ~/mcp_agent_mail/.env | sed -E 's/^HTTP_BEARER_TOKEN=//') || true
+  fi
+  
+  # Generate a new token if none was found
+  if [[ -z "${HTTP_BEARER_TOKEN:-}" ]]; then
+    HTTP_BEARER_TOKEN=$("$python_bin" -c 'import secrets; print(secrets.token_hex(32))')
+  fi
+  
+  export HTTP_BEARER_TOKEN
+}
+
 # Start server in background using run helper; log to logs directory
 start_server_background() {
   local helper="scripts/run_server_with_token.sh"
