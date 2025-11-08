@@ -32,7 +32,7 @@ from .config import Settings, get_settings
 from .db import ensure_schema, get_session, init_engine
 from .guard import install_guard as install_guard_script, uninstall_guard as uninstall_guard_script
 from .llm import complete_system_user
-from .models import Agent, AgentLink, FileReservation, Message, MessageRecipient, Project, ProjectSiblingSuggestion
+from .models import Agent, FileReservation, Message, MessageRecipient, Project, ProjectSiblingSuggestion
 from .storage import (
     ProjectArchive,
     archive_write_lock,
@@ -1292,8 +1292,7 @@ async def _delete_agent(project: Project, name: str, settings: Settings) -> dict
     2. Deletes associated MessageRecipient records
     3. Deletes messages sent by the agent
     4. Deletes file reservations held by the agent
-    5. Deletes agent links involving the agent
-    6. Writes a deletion marker to the Git archive
+    5. Writes a deletion marker to the Git archive
 
     Returns a dict with deletion statistics.
     """
@@ -1317,7 +1316,6 @@ async def _delete_agent(project: Project, name: str, settings: Settings) -> dict
         "message_recipients_deleted": 0,
         "messages_deleted": 0,
         "file_reservations_deleted": 0,
-        "agent_links_deleted": 0,
     }
 
     async with get_session() as session, session.begin():
@@ -1354,15 +1352,7 @@ async def _delete_agent(project: Project, name: str, settings: Settings) -> dict
         )
         stats["file_reservations_deleted"] = int(res4.rowcount or 0)
 
-        # 5) Delete agent links (both as source and target)
-        res5 = await session.execute(
-            delete(AgentLink).where(
-                or_(AgentLink.a_agent_id == agent_id, AgentLink.b_agent_id == agent_id)
-            )
-        )
-        stats["agent_links_deleted"] = int(res5.rowcount or 0)
-
-        # 6) Finally, delete the agent itself
+        # 5) Finally, delete the agent itself
         await session.execute(delete(Agent).where(Agent.id == agent_id))
 
     # Write deletion marker to Git archive
@@ -1371,91 +1361,6 @@ async def _delete_agent(project: Project, name: str, settings: Settings) -> dict
         await write_agent_deletion_marker(archive, agent_name, stats)
 
     return stats
-
-
-async def _get_or_create_cross_project_alias(
-    project: Project,
-    sender: Agent,
-    settings: Settings,
-) -> Agent:
-    """Create or reuse a sender alias in the target project without stealing the original handle."""
-
-    alias_hint = f"{sender.name}_{project.slug or project.human_key or project.id or 'project'}"
-    alias_name_pref = sanitize_agent_name(alias_hint) or sanitize_agent_name(sender.name) or sender.name
-    existing = await _get_agent_optional(project, alias_name_pref)
-    if existing:
-        return existing
-
-    alias_name = await _generate_unique_agent_name(
-        project,
-        settings,
-        alias_name_pref,
-        retire_conflicts=False,
-        include_same_project_conflicts=True,
-    )
-    return await _create_agent_record(project, alias_name, sender.program, sender.model, sender.task_description)
-
-
-async def _ensure_cross_project_link(
-    source_project: Project,
-    source_agent: Agent,
-    target_project: Project,
-    target_agent: Agent,
-    *,
-    ttl_seconds: int,
-    reason: str = "auto-cross-project",
-) -> AgentLink:
-    """Ensure a directed AgentLink exists and is approved between two projects."""
-
-    if any(item is None for item in (source_project.id, source_agent.id, target_project.id, target_agent.id)):
-        raise ValueError("Projects and agents must be persisted before creating cross-project links.")
-
-    await ensure_schema()
-    now = datetime.now(timezone.utc)
-    ttl = max(0, int(ttl_seconds or 0))
-    expires = now + timedelta(seconds=max(60, ttl)) if ttl else None
-
-    async with get_session() as session:
-        stmt = select(AgentLink).where(
-            AgentLink.a_project_id == source_project.id,
-            AgentLink.a_agent_id == source_agent.id,
-            AgentLink.b_project_id == target_project.id,
-            AgentLink.b_agent_id == target_agent.id,
-        )
-        existing = (await session.execute(stmt)).scalars().first()
-        if existing:
-            updated = False
-            if existing.status != "approved":
-                existing.status = "approved"
-                updated = True
-            if expires and (existing.expires_ts is None or existing.expires_ts < expires):
-                existing.expires_ts = expires
-                updated = True
-            if reason and reason not in (existing.reason or ""):
-                existing.reason = reason
-                updated = True
-            if updated:
-                existing.updated_ts = now
-                session.add(existing)
-                await session.commit()
-                await session.refresh(existing)
-            return existing
-
-        link = AgentLink(
-            a_project_id=source_project.id or 0,
-            a_agent_id=source_agent.id or 0,
-            b_project_id=target_project.id or 0,
-            b_agent_id=target_agent.id or 0,
-            status="approved",
-            reason=reason,
-            created_ts=now,
-            updated_ts=now,
-            expires_ts=expires,
-        )
-        session.add(link)
-        await session.commit()
-        await session.refresh(link)
-        return link
 
 
 
@@ -2910,13 +2815,12 @@ def build_mcp_server() -> FastMCP:
         - Deletes all messages sent by the agent
         - Deletes all message recipient records for the agent
         - Deletes all file reservations held by the agent
-        - Deletes all agent links (contacts) involving the agent
         - Writes a deletion marker to the Git archive at agents/<Name>/deleted.json
 
         WARNING
         -------
-        This operation is DESTRUCTIVE and IRREVERSIBLE. All messages, reservations,
-        and links associated with this agent will be permanently deleted from the database.
+        This operation is DESTRUCTIVE and IRREVERSIBLE. All messages and reservations
+        associated with this agent will be permanently deleted from the database.
         A deletion marker will be preserved in the Git archive for audit purposes.
 
         Parameters
@@ -2936,7 +2840,6 @@ def build_mcp_server() -> FastMCP:
             - message_recipients_deleted: Number of recipient records deleted
             - messages_deleted: Number of messages deleted
             - file_reservations_deleted: Number of file reservations deleted
-            - agent_links_deleted: Number of agent links deleted
 
         Examples
         --------
