@@ -229,3 +229,275 @@ async def test_register_agent_same_slug_different_human_keys(isolated_env):
         assert who1.data.get("name") == "Agent1"
         assert who2.data.get("name") == "Agent2"
 
+
+@pytest.mark.asyncio
+async def test_delete_agent_basic(isolated_env):
+    """Test basic agent deletion."""
+    server = build_mcp_server()
+    async with Client(server) as client:
+        await client.call_tool("ensure_project", {"human_key": "/test"})
+        
+        # Register an agent
+        await client.call_tool(
+            "register_agent",
+            {"project_key": "Test", "program": "codex", "model": "gpt-5", "name": "TestAgent"},
+        )
+        
+        # Verify agent exists
+        who = await client.call_tool(
+            "whois",
+            {"project_key": "Test", "agent_name": "TestAgent"},
+        )
+        assert who.data.get("name") == "TestAgent"
+        
+        # Delete the agent
+        result = await client.call_tool(
+            "delete_agent",
+            {"project_key": "Test", "name": "TestAgent"},
+        )
+        
+        # Verify deletion stats
+        stats = result.data
+        assert stats.get("agent_name") == "TestAgent"
+        
+        # Verify agent no longer exists
+        with pytest.raises(Exception):  # Should raise error when agent doesn't exist
+            await client.call_tool(
+                "whois",
+                {"project_key": "Test", "agent_name": "TestAgent"},
+            )
+
+
+@pytest.mark.asyncio
+async def test_delete_agent_with_messages(isolated_env):
+    """Test deleting an agent that has sent and received messages."""
+    server = build_mcp_server()
+    async with Client(server) as client:
+        await client.call_tool("ensure_project", {"human_key": "/test"})
+        
+        # Register two agents
+        await client.call_tool(
+            "register_agent",
+            {"project_key": "Test", "program": "codex", "model": "gpt-5", "name": "Sender"},
+        )
+        await client.call_tool(
+            "register_agent",
+            {"project_key": "Test", "program": "codex", "model": "gpt-5", "name": "Receiver"},
+        )
+        
+        # Send messages from Sender to Receiver
+        await client.call_tool(
+            "send_message",
+            {
+                "project_key": "Test",
+                "sender_name": "Sender",
+                "to": ["Receiver"],
+                "subject": "Test Message 1",
+                "body_md": "Hello from sender",
+            },
+        )
+        await client.call_tool(
+            "send_message",
+            {
+                "project_key": "Test",
+                "sender_name": "Sender",
+                "to": ["Receiver"],
+                "subject": "Test Message 2",
+                "body_md": "Another message",
+            },
+        )
+        
+        # Send a message from Receiver to Sender
+        await client.call_tool(
+            "send_message",
+            {
+                "project_key": "Test",
+                "sender_name": "Receiver",
+                "to": ["Sender"],
+                "subject": "Reply",
+                "body_md": "Hello back",
+            },
+        )
+        
+        # Delete the Sender agent
+        result = await client.call_tool(
+            "delete_agent",
+            {"project_key": "Test", "name": "Sender"},
+        )
+        
+        # Verify deletion stats include messages and recipients
+        stats = result.data
+        assert stats.get("agent_name") == "Sender"
+        assert stats.get("messages_deleted") == 2  # Two messages sent by Sender
+        assert stats.get("message_recipients_deleted") >= 2  # At least recipients of those messages
+        
+        # Verify Sender no longer exists
+        with pytest.raises(Exception):
+            await client.call_tool(
+                "whois",
+                {"project_key": "Test", "agent_name": "Sender"},
+            )
+        
+        # Verify Receiver still exists and can be queried
+        who = await client.call_tool(
+            "whois",
+            {"project_key": "Test", "agent_name": "Receiver"},
+        )
+        assert who.data.get("name") == "Receiver"
+
+
+@pytest.mark.asyncio
+async def test_delete_agent_with_agent_links(isolated_env):
+    """Test deleting an agent that has agent links (contacts)."""
+    server = build_mcp_server()
+    async with Client(server) as client:
+        await client.call_tool("ensure_project", {"human_key": "/test"})
+        
+        # Register three agents
+        await client.call_tool(
+            "register_agent",
+            {"project_key": "Test", "program": "codex", "model": "gpt-5", "name": "Agent1"},
+        )
+        await client.call_tool(
+            "register_agent",
+            {"project_key": "Test", "program": "codex", "model": "gpt-5", "name": "Agent2"},
+        )
+        await client.call_tool(
+            "register_agent",
+            {"project_key": "Test", "program": "codex", "model": "gpt-5", "name": "Agent3"},
+        )
+        
+        # Create agent links using request_contact and respond_contact
+        # Agent1 requests contact with Agent2
+        await client.call_tool(
+            "request_contact",
+            {"project_key": "Test", "requester_name": "Agent1", "target_name": "Agent2"},
+        )
+        await client.call_tool(
+            "respond_contact",
+            {"project_key": "Test", "responder_name": "Agent2", "requester_name": "Agent1", "action": "approve"},
+        )
+        
+        # Agent1 requests contact with Agent3
+        await client.call_tool(
+            "request_contact",
+            {"project_key": "Test", "requester_name": "Agent1", "target_name": "Agent3"},
+        )
+        await client.call_tool(
+            "respond_contact",
+            {"project_key": "Test", "responder_name": "Agent3", "requester_name": "Agent1", "action": "approve"},
+        )
+        
+        # Delete Agent1
+        result = await client.call_tool(
+            "delete_agent",
+            {"project_key": "Test", "name": "Agent1"},
+        )
+        
+        # Verify deletion stats include agent links
+        stats = result.data
+        assert stats.get("agent_name") == "Agent1"
+        assert stats.get("agent_links_deleted") >= 2  # At least the two contacts
+        
+        # Verify Agent1 no longer exists
+        with pytest.raises(Exception):
+            await client.call_tool(
+                "whois",
+                {"project_key": "Test", "agent_name": "Agent1"},
+            )
+        
+        # Verify Agent2 and Agent3 still exist
+        who2 = await client.call_tool(
+            "whois",
+            {"project_key": "Test", "agent_name": "Agent2"},
+        )
+        assert who2.data.get("name") == "Agent2"
+        
+        who3 = await client.call_tool(
+            "whois",
+            {"project_key": "Test", "agent_name": "Agent3"},
+        )
+        assert who3.data.get("name") == "Agent3"
+
+
+@pytest.mark.asyncio
+async def test_delete_agent_cascading_deletes(isolated_env):
+    """Test that deleting an agent properly cascades to all related records."""
+    server = build_mcp_server()
+    async with Client(server) as client:
+        await client.call_tool("ensure_project", {"human_key": "/test"})
+        
+        # Register two agents
+        await client.call_tool(
+            "register_agent",
+            {"project_key": "Test", "program": "codex", "model": "gpt-5", "name": "Alice"},
+        )
+        await client.call_tool(
+            "register_agent",
+            {"project_key": "Test", "program": "codex", "model": "gpt-5", "name": "Bob"},
+        )
+        
+        # Alice sends messages to Bob
+        for i in range(3):
+            await client.call_tool(
+                "send_message",
+                {
+                    "project_key": "Test",
+                    "sender_name": "Alice",
+                    "to": ["Bob"],
+                    "subject": f"Message {i}",
+                    "body_md": f"Content {i}",
+                },
+            )
+        
+        # Bob sends messages to Alice
+        for i in range(2):
+            await client.call_tool(
+                "send_message",
+                {
+                    "project_key": "Test",
+                    "sender_name": "Bob",
+                    "to": ["Alice"],
+                    "subject": f"Reply {i}",
+                    "body_md": f"Reply content {i}",
+                },
+            )
+        
+        # Create bidirectional contact relationship
+        await client.call_tool(
+            "request_contact",
+            {"project_key": "Test", "requester_name": "Alice", "target_name": "Bob"},
+        )
+        await client.call_tool(
+            "respond_contact",
+            {"project_key": "Test", "responder_name": "Bob", "requester_name": "Alice", "action": "approve"},
+        )
+        
+        # Delete Alice
+        result = await client.call_tool(
+            "delete_agent",
+            {"project_key": "Test", "name": "Alice"},
+        )
+        
+        # Verify all related records were deleted
+        stats = result.data
+        assert stats.get("agent_name") == "Alice"
+        assert stats.get("messages_deleted") == 3  # Alice sent 3 messages
+        # MessageRecipient: 3 records for Alice's messages to Bob + 2 records where Alice was recipient of Bob's messages
+        assert stats.get("message_recipients_deleted") >= 5
+        assert stats.get("agent_links_deleted") >= 1  # At least the Alice-Bob contact
+        
+        # Verify Alice no longer exists
+        with pytest.raises(Exception):
+            await client.call_tool(
+                "whois",
+                {"project_key": "Test", "agent_name": "Alice"},
+            )
+        
+        # Verify Bob still exists and can access his messages
+        who_bob = await client.call_tool(
+            "whois",
+            {"project_key": "Test", "agent_name": "Bob"},
+        )
+        assert who_bob.data.get("name") == "Bob"
+
