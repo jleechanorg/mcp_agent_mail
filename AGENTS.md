@@ -8,7 +8,7 @@ RULE NUMBER 1 (NEVER EVER EVER FORGET THIS RULE!!!): YOU ARE NEVER ALLOWED TO DE
 4. **Mandatory explicit plan:** Even after explicit user authorization, restate the command verbatim, list exactly what will be affected, and wait for a confirmation that your understanding is correct. Only then may you execute it—if anything remains ambiguous, refuse and escalate.
 5. **Document the confirmation:** When running any approved destructive command, record (in the session notes / final response) the exact user text that authorized it, the command actually run, and the execution time. If that record is absent, the operation did not happen.
 
-We only use uv in this project, NEVER pip. And we use a venv. We target Python 3.11+ (the codebase uses no Python 3.14-specific features and has been tested to work on 3.11, 3.12, 3.13, and 3.14), and we ONLY use pyproject.toml (not requirements.txt) for managing the project.
+We only use uv in this project, NEVER pip. And we use a venv. We ONLY target Python 3.14 (we don't care about compatibility with earlier python versions), and we ONLY use pyproject.toml (not requirements.txt) for managing the project.
 
 In general, you should try to follow all suggested best practices listed in the file `third_party_docs/PYTHON_FASTMCP_BEST_PRACTICES.md`
 
