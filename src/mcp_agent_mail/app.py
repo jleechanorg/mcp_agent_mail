@@ -1322,11 +1322,11 @@ async def _delete_agent(project: Project, name: str, settings: Settings) -> dict
     }
 
     async with get_session() as session, session.begin():
-        # First, get IDs of messages sent by this agent (needed for cascading deletes)
-        msg_result = await session.execute(
-            select(Message.id).where(Message.sender_id == agent_id)
+        # Subquery of messages authored by this agent (keeps work in DB; avoids param limits)
+        msg_ids_subq = select(Message.id).where(
+            Message.sender_id == agent_id,
+            Message.project_id == project.id,
         )
-        message_ids = [row[0] for row in msg_result.all()]
 
         # 1) Delete MessageRecipient records where this agent is the recipient
         res1 = await session.execute(
@@ -1336,11 +1336,12 @@ async def _delete_agent(project: Project, name: str, settings: Settings) -> dict
 
         # 2) Delete MessageRecipient records for messages authored by this agent
         #    (Must be done BEFORE deleting the messages to avoid FK violations)
-        if message_ids:
-            res2 = await session.execute(
-                delete(MessageRecipient).where(cast(Any, MessageRecipient.message_id).in_(message_ids))
+        res2 = await session.execute(
+            delete(MessageRecipient).where(
+                cast(Any, MessageRecipient.message_id).in_(msg_ids_subq)
             )
-            stats["message_recipients_deleted"] += int(res2.rowcount or 0)
+        )
+        stats["message_recipients_deleted"] += int(res2.rowcount or 0)
 
         # 3) Now safe to delete messages sent by the agent
         res3 = await session.execute(
@@ -6770,6 +6771,7 @@ def build_mcp_server() -> FastMCP:
     _EXTENDED_TOOL_REGISTRY.update({
         "acknowledge_message": acknowledge_message,
         "create_agent_identity": create_agent_identity,
+        "delete_agent": delete_agent,
         "search_messages": search_messages,
         "request_contact": request_contact,
         "respond_contact": respond_contact,
