@@ -80,7 +80,11 @@ write_atomic "$OUT_JSON" <<JSON
       "type": "http",
       "url": "${_URL}",
       "core": true,
-      "headers": {${AUTH_HEADER_LINE}}
+      "headers": {${AUTH_HEADER_LINE}},
+      "options": {
+        "timeoutSeconds": 180,
+        "initTimeoutSeconds": 30
+      }
     }
   }
 }
@@ -157,6 +161,7 @@ write_atomic "$LOCAL_TOML" <<TOML
 transport = "http"
 url = "${_URL}"
 # headers can be added if needed; localhost allowed without Authorization
+timeout_seconds = 180
 TOML
 
 # Bug 1 fix: Ensure secure permissions

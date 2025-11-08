@@ -4,6 +4,11 @@ set -euo pipefail
 # This script runs the MCP Agent Mail server using the PyPI package
 # instead of local development code
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source shared library functions
+source "$SCRIPT_DIR/lib.sh"
+
 echo "🔄 Installing mcp_mail from PyPI..."
 
 # Create a temporary directory for the isolated installation
@@ -54,21 +59,8 @@ uv pip install mcp_mail
 
 echo "✅ Installed mcp_mail from PyPI"
 
-# Load token from environment or .env file
-if [[ -z "${HTTP_BEARER_TOKEN:-}" ]]; then
-  if [[ -f ~/.config/mcp-agent-mail/.env ]]; then
-    HTTP_BEARER_TOKEN=$(grep -E '^HTTP_BEARER_TOKEN=' ~/.config/mcp-agent-mail/.env | sed -E 's/^HTTP_BEARER_TOKEN=//') || true
-  elif [[ -f ~/mcp_agent_mail/.env ]]; then
-    HTTP_BEARER_TOKEN=$(grep -E '^HTTP_BEARER_TOKEN=' ~/mcp_agent_mail/.env | sed -E 's/^HTTP_BEARER_TOKEN=//') || true
-  fi
-fi
-
-if [[ -z "${HTTP_BEARER_TOKEN:-}" ]]; then
-  # Generate a token if none exists
-  HTTP_BEARER_TOKEN=$("$PYTHON_BIN" -c 'import secrets; print(secrets.token_hex(32))')
-fi
-
-export HTTP_BEARER_TOKEN
+# Load or generate HTTP_BEARER_TOKEN
+load_or_generate_token "$PYTHON_BIN"
 
 echo "🚀 Starting MCP Mail server from PyPI package..."
 python -m mcp_agent_mail.cli serve-http "$@"

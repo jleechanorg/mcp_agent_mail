@@ -3464,14 +3464,50 @@ def build_mcp_server() -> FastMCP:
             unknown: set[str] = set()
 
             async def _route(name_list: list[str], kind: str) -> None:
-                """Simplified routing: look up agents globally by name."""
+                """Routing with cross-project addressing support.
+
+                Supported formats:
+                - Bare name: "AgentName"
+                - project:id#name: "project:/path/to/proj#AgentName"
+                - name@project: "AgentName@/path/to/proj"
+                """
                 for raw in name_list:
                     name = (raw or "").strip()
                     if not name:
                         continue
 
-                    # Look up agent globally by name
-                    resolved = global_lookup.get(name.lower())
+                    # Parse cross-project addressing formats
+                    target_name = name
+                    target_project = None
+
+                    # Format 1: "project:<identifier>#<agent-name>"
+                    if name.startswith("project:") and "#" in name:
+                        parts = name.split("#", 1)
+                        if len(parts) == 2:
+                            project_part = parts[0].replace("project:", "", 1)
+                            target_name = parts[1].strip()
+                            target_project = project_part.strip()
+
+                    # Format 2: "<agent-name>@<project-identifier>"
+                    elif "@" in name and not name.startswith("@"):
+                        parts = name.rsplit("@", 1)  # rsplit to handle names with @ in them
+                        if len(parts) == 2:
+                            target_name = parts[0].strip()
+                            target_project = parts[1].strip()
+
+                    # Look up agent (cross-project if target_project specified, otherwise global)
+                    if target_project:
+                        # Cross-project lookup: resolve project and agent explicitly
+                        try:
+                            proj = await _get_project_by_identifier(target_project)
+                            agent = await _get_agent(proj, target_name)
+                            resolved = agent.name  # Agent names are globally unique
+                        except NoResultFound:
+                            resolved = None
+                    else:
+                        # Global lookup by name (returns canonical name)
+                        resolved = global_lookup.get(target_name.lower())
+
                     if resolved:
                         if kind == "to":
                             all_to.append(resolved)

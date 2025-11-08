@@ -490,4 +490,30 @@ start_server_background() {
   _print "Server starting (logs: ${log_file})"
 }
 
+# Load or generate HTTP_BEARER_TOKEN
+# Usage: load_or_generate_token [python_binary]
+# Sets and exports HTTP_BEARER_TOKEN if not already set
+load_or_generate_token() {
+  local python_bin="${1:-python3}"
+
+  # Return if token already set
+  if [[ -n "${HTTP_BEARER_TOKEN:-}" ]]; then
+    return 0
+  fi
+
+  # Try to load from config directories
+  if [[ -f ~/.config/mcp-agent-mail/.env ]]; then
+    HTTP_BEARER_TOKEN=$(grep -E '^HTTP_BEARER_TOKEN=' ~/.config/mcp-agent-mail/.env | sed -E 's/^HTTP_BEARER_TOKEN=//') || true
+  elif [[ -f ~/mcp_agent_mail/.env ]]; then
+    HTTP_BEARER_TOKEN=$(grep -E '^HTTP_BEARER_TOKEN=' ~/mcp_agent_mail/.env | sed -E 's/^HTTP_BEARER_TOKEN=//') || true
+  fi
+
+  # Generate new token if not found
+  if [[ -z "${HTTP_BEARER_TOKEN:-}" ]]; then
+    HTTP_BEARER_TOKEN=$("$python_bin" -c 'import secrets; print(secrets.token_hex(32))')
+  fi
+
+  export HTTP_BEARER_TOKEN
+}
+
 

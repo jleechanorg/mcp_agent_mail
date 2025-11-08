@@ -99,6 +99,10 @@ if [[ -f "$MCP_JSON" ]] && [[ -s "$MCP_JSON" ]]; then
          "url": $url,
          "headers": {
            "Authorization": ("Bearer " + $token)
+         },
+         "options": {
+           "timeoutSeconds": 180,
+           "initTimeoutSeconds": 30
          }
        }' \
       "$MCP_JSON" > "$TMP_MERGE"; then
@@ -127,6 +131,10 @@ else
         "url": $url,
         "headers": {
           "Authorization": ("Bearer " + $token)
+        },
+        "options": {
+          "timeoutSeconds": 180,
+          "initTimeoutSeconds": 30
         }
       }
     }
@@ -262,4 +270,3 @@ _print "  - URL: ${_URL}"
 _print "  - Header: Authorization: Bearer <token>"
 _print ""
 _print "Documentation: https://code.visualstudio.com/docs/copilot/customization/mcp-servers"
-

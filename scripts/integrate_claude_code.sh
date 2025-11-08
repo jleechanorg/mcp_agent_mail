@@ -94,7 +94,11 @@ write_atomic "$SETTINGS_PATH" <<JSON
       "type": "http",
       "url": "${_URL}",
       "core": true,
-      "headers": {${AUTH_HEADER_LINE}}
+      "headers": {${AUTH_HEADER_LINE}},
+      "options": {
+        "timeoutSeconds": 180,
+        "initTimeoutSeconds": 30
+      }
     }
   },
   "hooks": {
@@ -149,7 +153,11 @@ write_atomic "$LOCAL_SETTINGS_PATH" <<JSON
       "type": "http",
       "url": "${_URL}",
       "core": true,
-      "headers": {${AUTH_HEADER_LINE}}
+      "headers": {${AUTH_HEADER_LINE}},
+      "options": {
+        "timeoutSeconds": 180,
+        "initTimeoutSeconds": 30
+      }
     }
   },
   "hooks": {
