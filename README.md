@@ -23,7 +23,7 @@ These improvements make the system more efficient, flexible, and easier to use i
 Install from PyPI with uv:
 
 ```bash
-uv pip install ai-universe-mail
+uv pip install mcp_mail
 ```
 
 ---
