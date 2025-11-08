@@ -43,7 +43,9 @@ async def test_list_extended_tools(isolated_env):
         all_categorized_tools = []
         for tools_list in result["by_category"].values():
             all_categorized_tools.extend(tools_list)
-        assert len(all_categorized_tools) == 19
+        # 14 extended tools after removing 5 contact-related tools (request_contact, respond_contact,
+        # list_contacts, set_contact_policy, macro_contact_handshake)
+        assert len(all_categorized_tools) == 14
 
 
 @pytest.mark.asyncio
