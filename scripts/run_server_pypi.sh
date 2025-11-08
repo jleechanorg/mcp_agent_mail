@@ -34,9 +34,10 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 # Install the package from PyPI using uv
-cd "$TEMP_ENV"
-uv venv --python "$PYTHON_BIN"
-source .venv/bin/activate
+# Note: We install in a temp dir but DON'T change working directory
+# so the server's SQLite DB and archive persist across restarts
+uv venv "$TEMP_ENV/.venv" --python "$PYTHON_BIN"
+source "$TEMP_ENV/.venv/bin/activate"
 
 uv pip install ai-universe-mail
 
