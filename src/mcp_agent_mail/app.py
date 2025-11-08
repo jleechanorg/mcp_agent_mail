@@ -2331,9 +2331,9 @@ def build_mcp_server() -> FastMCP:
         cc_names = _unique(cc_names)
         bcc_names = _unique(bcc_names)
         if to_names or cc_names or bcc_names:
-            to_agents = [await _get_agent(project, name) for name in to_names]
-            cc_agents = [await _get_agent(project, name) for name in cc_names]
-            bcc_agents = [await _get_agent(project, name) for name in bcc_names]
+            to_agents = [await _get_agent_by_name(name) for name in to_names]
+            cc_agents = [await _get_agent_by_name(name) for name in cc_names]
+            bcc_agents = [await _get_agent_by_name(name) for name in bcc_names]
         else:
             to_agents = []
             cc_agents = []
@@ -3376,7 +3376,6 @@ def build_mcp_server() -> FastMCP:
         """
         project = await _get_project_by_identifier(project_key)
         sender = await _get_agent_by_name(sender_name)
-        settings_local = get_settings()
         original = await _get_message(project, message_id)
         original_sender = await _get_agent_by_id_global(original.sender_id)
         thread_key = original.thread_id or str(original.id)
