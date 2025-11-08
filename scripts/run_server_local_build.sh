@@ -8,6 +8,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DIST_DIR="$REPO_ROOT/dist"
 
+# Source shared library functions
+source "$SCRIPT_DIR/lib.sh"
+
 echo "🔍 Looking for local wheel in $DIST_DIR..."
 
 # Find the most recent wheel file
@@ -25,10 +28,10 @@ echo "📦 Found wheel: $(basename "$WHEEL_FILE")"
 TEMP_ENV=$(mktemp -d -t mcp_mail-XXXXXX)
 trap 'rm -rf "$TEMP_ENV"' EXIT
 
-# Find Python 3.11+ (prefer stable versions, avoid Python 3.14 RC due to Pydantic issues)
+# Find Python 3.11-3.13 (Python 3.14+ has Pydantic type annotation compatibility issues)
 PYTHON_BIN=""
 MIN_VERSION=311  # e.g. 3.11 -> 311, 3.12 -> 312
-MAX_VERSION=313  # Avoid Python 3.14 RC
+MAX_VERSION=313  # Python 3.14+ has Pydantic type annotation compatibility issues
 
 # Try specific stable versions first
 for py in python3.13 python3.12 python3.11; do
@@ -69,21 +72,8 @@ uv pip install "$WHEEL_FILE"
 
 echo "✅ Installed mcp_mail from local build"
 
-# Load token from environment or .env file
-if [[ -z "${HTTP_BEARER_TOKEN:-}" ]]; then
-  if [[ -f ~/.config/mcp-agent-mail/.env ]]; then
-    HTTP_BEARER_TOKEN=$(grep -E '^HTTP_BEARER_TOKEN=' ~/.config/mcp-agent-mail/.env | sed -E 's/^HTTP_BEARER_TOKEN=//') || true
-  elif [[ -f ~/mcp_agent_mail/.env ]]; then
-    HTTP_BEARER_TOKEN=$(grep -E '^HTTP_BEARER_TOKEN=' ~/mcp_agent_mail/.env | sed -E 's/^HTTP_BEARER_TOKEN=//') || true
-  fi
-fi
-
-if [[ -z "${HTTP_BEARER_TOKEN:-}" ]]; then
-  # Generate a token if none exists
-  HTTP_BEARER_TOKEN=$("$PYTHON_BIN" -c 'import secrets; print(secrets.token_hex(32))')
-fi
-
-export HTTP_BEARER_TOKEN
+# Load or generate HTTP_BEARER_TOKEN
+load_or_generate_token "$PYTHON_BIN"
 
 echo "🚀 Starting MCP Mail server from local build..."
 python -m mcp_agent_mail.cli serve-http "$@"
