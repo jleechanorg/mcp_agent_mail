@@ -8,10 +8,15 @@ with different enforcement modes:
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 from fastmcp import Client
+from sqlalchemy import func, select
 
 from mcp_agent_mail.app import build_mcp_server
+from mcp_agent_mail.db import get_session
+from mcp_agent_mail.models import Agent, Project
 
 
 @pytest.mark.asyncio
@@ -37,7 +42,7 @@ async def test_agent_names_coerce_mode_auto_generates_unique_names(isolated_env)
         assert result1.data["name"] == "Alice"
 
         # Try to create another agent "Alice" in project2
-        # In coerce mode, this should succeed but with an auto-generated unique name
+        # In coerce mode (default), this retires the project1 agent and reuses the name
         result2 = await client.call_tool(
             "register_agent",
             arguments={
@@ -48,11 +53,26 @@ async def test_agent_names_coerce_mode_auto_generates_unique_names(isolated_env)
             },
         )
 
-        # Should get a different auto-generated name, not "Alice"
-        assert result2.data["name"] != "Alice"
-        # Should be a valid agent name (adjective+noun pattern)
-        assert len(result2.data["name"]) > 0
-        print(f"Auto-generated name in coerce mode: {result2.data['name']}")
+        # Should reuse the same name "Alice" (after retiring the project1 agent)
+        assert result2.data["name"] == "Alice"
+        assert result2.data["project_id"] != result1.data["project_id"]
+
+        # Verify that the old agent was retired
+        async with get_session() as session:
+            proj1 = (await session.execute(
+                select(Project).where(Project.human_key == "/tmp/project1")
+            )).scalars().first()
+            assert proj1 is not None
+
+            retired_agents = (await session.execute(
+                select(Agent).where(
+                    Agent.project_id == proj1.id,
+                    func.lower(Agent.name) == "alice",
+                )
+            )).scalars().all()
+            assert len(retired_agents) == 1
+            assert retired_agents[0].is_active is False
+            assert retired_agents[0].deleted_ts is not None
 
 
 @pytest.mark.asyncio
@@ -172,6 +192,65 @@ async def test_same_agent_can_be_reregistered_in_same_project(isolated_env):
         assert result2.data["name"] == "Alice"
         assert result2.data["task_description"] == "Task 2"
         assert result2.data["id"] == agent_id  # Same agent ID
+
+
+@pytest.mark.asyncio
+async def test_reusing_name_retires_previous_agent(isolated_env):
+    """Registering the same name elsewhere retires the prior identity."""
+    mcp = build_mcp_server()
+    async with Client(mcp) as client:
+        proj_a_key = "/tmp/reuse_project_a"
+        proj_b_key = "/tmp/reuse_project_b"
+        await client.call_tool("ensure_project", arguments={"human_key": proj_a_key})
+        await client.call_tool("ensure_project", arguments={"human_key": proj_b_key})
+
+        result_a = await client.call_tool(
+            "register_agent",
+            arguments={
+                "project_key": proj_a_key,
+                "program": "test_program",
+                "model": "test_model",
+                "name": "Convo",
+            },
+        )
+        assert result_a.data["name"] == "Convo"
+
+        result_b = await client.call_tool(
+            "register_agent",
+            arguments={
+                "project_key": proj_b_key,
+                "program": "test_program",
+                "model": "test_model",
+                "name": "Convo",
+            },
+        )
+        assert result_b.data["name"] == "Convo"
+        assert result_b.data["project_id"] != result_a.data["project_id"]
+
+        async with get_session() as session:
+            proj_a = (
+                await session.execute(select(Project).where(Project.human_key == proj_a_key))
+            ).scalars().first()
+            assert proj_a is not None
+            agents_a = (
+                await session.execute(select(Agent).where(Agent.project_id == proj_a.id))
+            ).scalars().all()
+            assert len(agents_a) == 1
+            retired = agents_a[0]
+            assert retired.is_active is False
+            assert retired.deleted_ts is not None
+
+            active_convo = (
+                await session.execute(
+                    select(Agent)
+                    .where(
+                        func.lower(Agent.name) == "convo",
+                        cast(Any, Agent.is_active).is_(True),
+                    )
+                )
+            ).scalars().all()
+            assert len(active_convo) == 1
+            assert active_convo[0].project_id != proj_a.id
 
 
 @pytest.mark.asyncio

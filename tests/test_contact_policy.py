@@ -6,7 +6,6 @@ import json
 import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
-
 from sqlalchemy import select
 
 from mcp_agent_mail import config as _config

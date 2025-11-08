@@ -15,7 +15,7 @@ Requirements:
 
 from __future__ import annotations
 
-import os
+import contextlib
 import re
 import secrets
 import shutil
@@ -29,9 +29,9 @@ from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn
 
 console = Console()
 
@@ -152,18 +152,18 @@ def show_deployment_summary(
     if deploy_type == "local":
         console.print(f"[bold]Target:[/] Local export to {deployment.get('path', './mailbox-export')}")
     elif deploy_type == "github-new":
-        console.print(f"[bold]Target:[/] GitHub Pages")
+        console.print("[bold]Target:[/] GitHub Pages")
         console.print(f"  Repository: {deployment.get('repo_name', '(not set)')}")
         console.print(f"  Visibility: {'Private' if deployment.get('private', False) else 'Public'}")
     elif deploy_type == "cloudflare-pages":
-        console.print(f"[bold]Target:[/] Cloudflare Pages")
+        console.print("[bold]Target:[/] Cloudflare Pages")
         console.print(f"  Project: {deployment.get('project_name', '(not set)')}")
 
     # Signing
     if signing_key:
-        console.print(f"[bold]Signing:[/] Enabled (Ed25519)")
+        console.print("[bold]Signing:[/] Enabled (Ed25519)")
     else:
-        console.print(f"[bold]Signing:[/] Disabled")
+        console.print("[bold]Signing:[/] Disabled")
 
     console.print()
     return Confirm.ask("[bold]Proceed with export and deployment?[/]", default=True)
@@ -482,10 +482,8 @@ def generate_signing_key() -> Path:
     key_path = Path.cwd() / f"signing-{secrets.token_hex(4)}.key"
     key_path.write_bytes(secrets.token_bytes(32))
     # Set secure permissions (best-effort on Windows where this may not apply)
-    try:
+    with contextlib.suppress(OSError, NotImplementedError):
         key_path.chmod(0o600)
-    except (OSError, NotImplementedError):
-        pass  # Windows or other platform without Unix permissions
     console.print(f"[yellow]⚠ Private signing key saved to:[/] {key_path}")
     console.print("[yellow]⚠ Back up this file securely - you'll need it to update the bundle[/]")
     return key_path
@@ -535,7 +533,7 @@ def export_bundle(
     ) as progress:
         task = progress.add_task("Exporting...", total=None)
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            subprocess.run(cmd, capture_output=True, text=True, check=True)
             progress.update(task, completed=True)
             console.print("[green]✓ Export complete[/]")
             return True, signing_pub_path
@@ -582,7 +580,7 @@ def preview_bundle(output_dir: Path) -> bool:
         # Wait for server to be ready by polling the port
         console.print("[cyan]Waiting for server to start...[/]")
         max_attempts = 30
-        for attempt in range(max_attempts):
+        for _attempt in range(max_attempts):
             try:
                 with socket.create_connection(("127.0.0.1", port), timeout=1):
                     break
@@ -687,8 +685,11 @@ def init_and_push_repo(output_dir: Path, repo_full_name: str, branch: str = "mai
                 bufsize=1,  # Line buffered
             )
 
+            stdout_stream = process.stdout
+            if stdout_stream is None:
+                raise RuntimeError("Expected stdout stream while running git command.")
             # Print output as it arrives
-            for line in process.stdout:
+            for line in stdout_stream:
                 console.print(f"  [dim]{line.rstrip()}[/]")
 
             process.wait()
@@ -737,7 +738,7 @@ def enable_github_pages(repo_full_name: str, branch: str = "main") -> tuple[bool
         )
         pages_url = result.stdout.strip()
 
-        console.print(f"[green]✓ GitHub Pages enabled[/]")
+        console.print("[green]✓ GitHub Pages enabled[/]")
         return True, pages_url
 
     except subprocess.CalledProcessError as e:
@@ -766,7 +767,7 @@ def enable_github_pages(repo_full_name: str, branch: str = "main") -> tuple[bool
 
 def deploy_to_cloudflare_pages(output_dir: Path, project_name: str) -> tuple[bool, str]:
     """Deploy bundle to Cloudflare Pages with real-time output."""
-    console.print(f"\n[bold cyan]Deploying to Cloudflare Pages...[/]")
+    console.print("\n[bold cyan]Deploying to Cloudflare Pages...[/]")
 
     try:
         # Use wrangler pages deploy command with real-time streaming
@@ -788,8 +789,11 @@ def deploy_to_cloudflare_pages(output_dir: Path, project_name: str) -> tuple[boo
         # Collect output and parse for deployment URL
         pages_url = ""
 
+        stdout_stream = process.stdout
+        if stdout_stream is None:
+            raise RuntimeError("Expected stdout stream during Cloudflare deployment.")
         # Stream output in real-time
-        for line in process.stdout:
+        for line in stdout_stream:
             stripped = line.rstrip()
             console.print(f"  [dim]{stripped}[/]")
 
@@ -809,7 +813,7 @@ def deploy_to_cloudflare_pages(output_dir: Path, project_name: str) -> tuple[boo
             # Fallback: construct expected URL
             pages_url = f"https://{project_name}.pages.dev"
 
-        console.print(f"\n[bold green]✓ Deployed to Cloudflare Pages[/]")
+        console.print("\n[bold green]✓ Deployed to Cloudflare Pages[/]")
         return True, pages_url
 
     except Exception as e:
@@ -846,19 +850,24 @@ def main() -> None:
             default=True,
         )
 
+    saved_config: dict[str, Any] | None = last_config if use_last_config else None
+
     # If not using last config, go through interactive setup
     if not use_last_config:
         # Get deployment target first to know which CLIs we need
         deployment = select_deployment_target()
     else:
+        if saved_config is None:
+            raise RuntimeError("Expected saved configuration when reusing previous settings.")
         # Reconstruct deployment config from saved settings
-        deployment = last_config.get("deployment", {})
+        deployment = saved_config.get("deployment", {})
 
         # Validate that deployment config is complete
         if not deployment.get("type"):
             console.print("[yellow]Saved deployment config is invalid, please select again[/]")
             deployment = select_deployment_target()
             use_last_config = False  # Fall back to interactive mode
+            saved_config = None
 
     # Check prerequisites based on deployment choice
     require_gh = deployment.get("type") == "github-new"
@@ -881,19 +890,25 @@ def main() -> None:
         # Record selected project indices for saving config later
         selected_indices = [i for i, p in enumerate(projects_list) if p["human_key"] in selected_projects]
     else:
+        if saved_config is None:
+            raise RuntimeError("Expected saved configuration when reusing previous settings.")
         # Use saved project indices
-        saved_indices = last_config.get("project_indices", list(range(len(projects_list))))
+        saved_indices = saved_config.get("project_indices", list(range(len(projects_list))))
         # Validate indices are still valid
         selected_indices = [i for i in saved_indices if i < len(projects_list)]
         if not selected_indices:
             console.print("[yellow]Saved project selection invalid, please select again[/]")
             selected_projects = select_projects(projects_list)
+            scrub_preset = select_scrub_preset()
             selected_indices = [i for i, p in enumerate(projects_list) if p["human_key"] in selected_projects]
+            use_last_config = False
+            saved_config = None
         else:
             selected_projects = [projects_list[idx]["human_key"] for idx in selected_indices]
             console.print(f"[green]Using saved selection: {len(selected_projects)} project(s)[/]")
 
-        scrub_preset = last_config.get("scrub_preset", "standard")
+        if use_last_config and saved_config is not None:
+            scrub_preset = saved_config.get("scrub_preset", "standard")
 
     # Signing key (use saved preference if available)
     signing_key = None
@@ -908,8 +923,10 @@ def main() -> None:
                 key_path = Prompt.ask("Path to existing signing key")
                 signing_key = Path(key_path).expanduser().resolve()
     else:
-        use_signing = last_config.get("use_signing", True)
-        generate_new_key = last_config.get("generate_new_key", True)
+        if saved_config is None:
+            raise RuntimeError("Expected saved configuration when reusing previous settings.")
+        use_signing = saved_config.get("use_signing", True)
+        generate_new_key = saved_config.get("generate_new_key", True)
         if use_signing:
             if generate_new_key:
                 signing_key = generate_signing_key()
@@ -1005,7 +1022,7 @@ def main() -> None:
                     "generate_new_key": generate_new_key,
                 })
             else:
-                console.print(f"\n[yellow]Repository created but Pages setup failed[/]")
+                console.print("\n[yellow]Repository created but Pages setup failed[/]")
                 console.print(f"Visit https://github.com/{repo_full_name}/settings/pages to enable manually")
 
         elif deployment.get("type") == "cloudflare-pages":
@@ -1037,7 +1054,7 @@ def main() -> None:
                     "generate_new_key": generate_new_key,
                 })
             else:
-                console.print(f"\n[yellow]Cloudflare Pages deployment failed[/]")
+                console.print("\n[yellow]Cloudflare Pages deployment failed[/]")
                 sys.exit(1)
 
 

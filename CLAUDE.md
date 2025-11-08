@@ -11,3 +11,45 @@ bash -lc "cd /Users/jleechan/mcp_agent_mail && ./scripts/run_server_with_token.s
 - Launch Claude Code/Claude Desktop **after** the command above succeeds so it can reuse the existing HTTP MCP endpoint at `http://127.0.0.1:8765/mcp/`.
 
 With the server running, Claude agents can call `ensure_project`, `register_agent`, `fetch_inbox`, and the other MCP tools without additional setup.
+
+## PR Responsibility Model
+
+When working on pull requests, understand that **PRs own all regressions versus `origin/main`**, regardless of which commit in the PR introduced them.
+
+### Key Principle
+
+If a bug exists in the PR branch but NOT in `origin/main`, the PR is responsible for fixing it before merge—even if:
+- The bug was introduced in an earlier commit by a different contributor
+- Your recent work didn't touch the affected code
+- The bug came from a feature added days ago in the same PR
+
+### Example Scenario
+
+**PR #13 Timeline:**
+1. Day 1: Contributor A adds retirement feature (commits 67b6974, a4844b7)
+   - Introduces 5 bugs in the retirement logic
+2. Day 3: Contributor B adds cross-project messaging (commits d44c7ae, d6a6754)
+   - Doesn't touch retirement code
+   - Introduces 1 new bug (unused import)
+
+**Who fixes what?**
+- Contributor B must fix ALL 6 bugs (5 pre-existing + 1 new)
+- Why? The PR as a whole must be green vs `origin/main`
+- The automation bots don't care which commit introduced the bugs
+
+### Best Practices
+
+1. **Check the entire PR branch**, not just your commits
+2. **Run full test suite** before adding commits to an existing PR
+3. **Document pre-existing bugs** in `roadmap/` but also fix them
+4. **Communicate with earlier contributors** but don't block on them
+5. **Own the merge** - if you're the last contributor, you own getting it green
+
+### Reference
+
+See PR #13 for a real example where this model was applied:
+- Commits 336c20f, 879a81c, 80e9df5 fixed both new and pre-existing bugs
+- All regressions vs `origin/main` were resolved before merge
+- Documentation in `roadmap/pr13_preexisting_bugs.md` explained the triage
+
+This ensures every merged PR maintains a clean history and working state.
