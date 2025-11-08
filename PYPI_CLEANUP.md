@@ -4,11 +4,15 @@
 
 The package has been renamed from `mcp-agent-mail` to `ai-universe-mail`.
 
-### To Remove the Old Package
+## Invalid Version: ai-universe-mail 0.1.0
+
+Version 0.1.0 was published with incorrect Python requirements (`>=3.11` instead of `>=3.14`) and should be yanked.
+
+### To Remove the Old Package (mcp-agent-mail)
 
 PyPI doesn't provide a public API for deleting or yanking packages. You must use the web interface:
 
-#### Option 1: Delete Project (Recommended)
+#### Option 1: Delete Project (Recommended for complete removal)
 
 1. Log in to <https://pypi.org>
 2. Navigate to <https://pypi.org/project/mcp-agent-mail/>
@@ -30,9 +34,26 @@ PyPI doesn't provide a public API for deleting or yanking packages. You must use
 
 **Effect**: Prevents new installations but keeps the package visible with a warning.
 
-## New Package: ai-universe-mail
+---
 
-**Install**: `pip install ai-universe-mail`
+### To Yank Invalid Version (ai-universe-mail 0.1.0)
+
+Version 0.1.0 has incorrect Python requirements and must be yanked:
+
+1. Log in to <https://pypi.org>
+2. Navigate to <https://pypi.org/project/ai-universe-mail/>
+3. Click on version "0.1.0"
+4. Click "Options" dropdown
+5. Select "Yank version 0.1.0"
+6. Add yank reason: "Incorrect Python version requirement (should be >=3.14, not >=3.11)"
+
+**Important**: Do NOT yank version 0.1.1 - this is the correct version with Python 3.14 requirement.
+
+---
+
+## Current Package: ai-universe-mail 0.1.1
+
+**Install**: `uv pip install ai-universe-mail`
 
 **PyPI URL**: <https://pypi.org/project/ai-universe-mail/>
 
