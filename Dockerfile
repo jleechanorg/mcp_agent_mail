@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Build stage: Use full Debian image with build tools
-FROM python:3.14-bookworm AS build
+FROM python:3.11-bookworm AS build
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
@@ -27,7 +27,7 @@ COPY AGENTS.md ./
 RUN uv sync --frozen --no-editable
 
 # Runtime stage: Use slim image with runtime dependencies
-FROM python:3.14-slim-bookworm AS runtime
+FROM python:3.11-slim-bookworm AS runtime
 
 # Install runtime dependencies: git (for GitPython) and libpq (for asyncpg)
 RUN apt-get update && apt-get install -y --no-install-recommends \

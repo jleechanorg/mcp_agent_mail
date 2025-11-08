@@ -82,6 +82,7 @@ write_atomic "$OUT_JSON" <<JSON
     "mcp-agent-mail": {
       "type": "http",
       "url": "${_URL}",
+      "core": true,
 ${AUTH_HEADER_LINE}
       "note": "Import or configure this server in Windsurf's MCP settings"
     }
@@ -168,5 +169,4 @@ else
   _print "  - Header: (optional on localhost if server allows)"
 fi
 _print "Then start the server with: ${RUN_HELPER}"
-
 

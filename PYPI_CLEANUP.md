@@ -1,12 +1,11 @@
 # PyPI Package Cleanup
 
-## Old Package: mcp-agent-mail
+## Deprecated Packages
 
-The package has been renamed from `mcp-agent-mail` to `ai-universe-mail`.
+Two legacy artifacts still appear on PyPI and should be cleaned up to avoid confusion:
 
-## Invalid Version: ai-universe-mail 0.1.0
-
-Version 0.1.0 was published with incorrect Python requirements (`>=3.11` instead of `>=3.14`) and should be yanked.
+- `mcp-agent-mail` (original package name)
+- `ai-universe-mail` version `0.1.0` (intermediate rename)
 
 ### To Remove the Old Package (mcp-agent-mail)
 
@@ -30,31 +29,31 @@ PyPI doesn't provide a public API for deleting or yanking packages. You must use
 3. Click on version "0.1.0"
 4. Click "Options" dropdown
 5. Select "Yank version 0.1.0"
-6. Add yank reason: "Package renamed to ai-universe-mail"
+6. Add yank reason: "Package superseded by mcp_mail"
 
 **Effect**: Prevents new installations but keeps the package visible with a warning.
 
 ---
 
-### To Yank Invalid Version (ai-universe-mail 0.1.0)
+### To Yank ai-universe-mail 0.1.0
 
-Version 0.1.0 has incorrect Python requirements and must be yanked:
+Version 0.1.0 was an intermediate release before the project settled on the `mcp_mail` name. Yank it so new installations move to the canonical package:
 
 1. Log in to <https://pypi.org>
 2. Navigate to <https://pypi.org/project/ai-universe-mail/>
 3. Click on version "0.1.0"
 4. Click "Options" dropdown
 5. Select "Yank version 0.1.0"
-6. Add yank reason: "Incorrect Python version requirement (should be >=3.14, not >=3.11)"
+6. Add yank reason: "Package superseded by mcp_mail"
 
-**Important**: Do NOT yank version 0.1.1 - this is the correct version with Python 3.14 requirement.
+**Important**: Do NOT yank newer versions that might exist under `ai-universe-mail` if they are still in use—only version 0.1.0 needs to be removed.
 
 ---
 
-## Current Package: ai-universe-mail 0.1.1
+## Current Package: mcp_mail (Python 3.11+)
 
-**Install**: `uv pip install ai-universe-mail`
+**Install**: `uv pip install mcp_mail`
 
-**PyPI URL**: <https://pypi.org/project/ai-universe-mail/>
+**PyPI URL**: <https://pypi.org/project/mcp-mail/>
 
-The server has been verified to run successfully from the PyPI package.
+The server is tested on Python 3.11, 3.12, and 3.13 and should be installed via uv (per project policy).

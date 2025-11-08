@@ -20,7 +20,7 @@ These improvements make the system more efficient, flexible, and easier to use i
 
 ## Installation
 
-Install from PyPI with uv:
+Install from PyPI with uv (requires Python 3.11):
 
 ```bash
 uv pip install mcp_mail
@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/mcp_agent_mail/ma
 What this does:
 
 - Installs uv if missing and updates your PATH for this session
-- Creates a Python 3.14 virtual environment and installs dependencies with uv
+- Creates a Python 3.11 virtual environment and installs dependencies with uv
 - Runs the auto-detect integration to wire up supported agent tools
 - Starts the MCP HTTP server on port 8765 and prints a masked bearer token
 - Creates helper scripts under `scripts/` (including `run_server_with_token.sh`)
@@ -82,7 +82,7 @@ uv run python -m mcp_agent_mail.cli config set-port 9000
 
 ### If you want to do it yourself
 
-Clone the repo, set up and install with uv in a Python 3.14 venv (install uv if you don't have it already), and then run `scripts/automatically_detect_all_installed_coding_agents_and_install_mcp_agent_mail_in_all.sh`. This will automatically set things up for your various installed coding agent tools and start the MCP server on port 8765. If you want to run the MCP server again in the future, simply run `scripts/run_server_with_token.sh`:
+Clone the repo, set up and install with uv in a Python 3.11 venv (install uv if you don't have it already), and then run `scripts/automatically_detect_all_installed_coding_agents_and_install_mcp_agent_mail_in_all.sh`. This will automatically set things up for your various installed coding agent tools and start the MCP server on port 8765. If you want to run the MCP server again in the future, simply run `scripts/run_server_with_token.sh`:
 
 ```bash
 # Install uv (if you don't have it already)
@@ -93,9 +93,9 @@ export PATH="$HOME/.local/bin:$PATH"
 git clone https://github.com/Dicklesworthstone/mcp_agent_mail
 cd mcp_agent_mail
 
-# Create a Python 3.14 virtual environment and install dependencies
-uv python install 3.14
-uv venv -p 3.14
+# Create a Python 3.11 virtual environment and install dependencies
+uv python install 3.11
+uv venv -p 3.11
 source .venv/bin/activate
 uv sync
 
@@ -1598,7 +1598,7 @@ result = await client.call_tool("list_extended_tools", {})
 
 ## Development quick start
 
-Prerequisite: complete the setup above (Python 3.14 + uv venv + uv sync).
+Prerequisite: complete the setup above (Python 3.11 + uv venv + uv sync).
 
 Dev helpers:
 

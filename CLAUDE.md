@@ -10,7 +10,7 @@ Use the published PyPI package for production use:
 bash -lc "cd /Users/jleechan/mcp_agent_mail && ./scripts/run_server_pypi.sh >/tmp/mcp_agent_mail_server.log 2>&1 & echo \$!"
 ```
 
-This installs `ai-universe-mail` from PyPI in an isolated environment and runs the server.
+This installs `mcp_mail` from PyPI in an isolated environment and runs the server.
 
 ## Running from Local Source (Development)
 
