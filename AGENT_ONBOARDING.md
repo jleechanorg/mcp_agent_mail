@@ -558,28 +558,6 @@ Align with an existing discussion thread:
 3. Fetches recent inbox
 4. Returns context to jump into the discussion
 
-### Contact Policies (OPTIONAL - NOT ENFORCED)
-
-**NOTE: Contact policies are no longer enforced. All agents can message each other directly without approval.**
-
-This feature is maintained for backward compatibility only.
-
-```json
-{
-  "tool": "set_contact_policy",
-  "arguments": {
-    "project_key": "/data/projects/my-project",
-    "agent_name": "BackendDev",
-    "policy": "auto"
-  }
-}
-```
-
-**Policies (only effective if enforcement is enabled):**
-- `open` - Anyone can message you without approval
-- `auto` - Auto-approve contacts with reservation overlap or same thread
-- `contacts_only` - Only approved contacts can message you
-- `block_all` - No incoming messages allowed
 
 ## Getting Help
 

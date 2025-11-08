@@ -75,6 +75,7 @@ write_atomic "$OUT_JSON" <<JSON
     "mcp-agent-mail": {
       "type": "http",
       "url": "${_URL}",
+      "core": true,
       "headers": {${AUTH_HEADER_LINE}}
     }
   }
@@ -128,7 +129,8 @@ write_atomic "$HOME_GEMINI_JSON" <<JSON
   "mcpServers": {
     "mcp-agent-mail": {
       "type": "http",
-      "url": "${_URL}"
+      "url": "${_URL}",
+      "core": true
     }
   }
 }
@@ -196,4 +198,3 @@ if command -v gemini >/dev/null 2>&1; then
 else
   log_warn "Gemini CLI not found in PATH; skipped automatic registration."; _print "Run: gemini mcp add -s user -t http mcp-agent-mail ${_URL}"
 fi
-

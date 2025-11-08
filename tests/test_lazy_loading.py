@@ -43,7 +43,9 @@ async def test_list_extended_tools(isolated_env):
         all_categorized_tools = []
         for tools_list in result["by_category"].values():
             all_categorized_tools.extend(tools_list)
-        assert len(all_categorized_tools) == 19
+        # 14 extended tools after removing 5 contact-related tools (request_contact, respond_contact,
+        # list_contacts, set_contact_policy, macro_contact_handshake)
+        assert len(all_categorized_tools) == 14
 
 
 @pytest.mark.asyncio
@@ -61,14 +63,14 @@ async def test_call_extended_tool_valid(isolated_env):
         })
 
         # Test calling an extended tool via the meta-tool
-        # Use list_contacts as it's a simple read-only tool
+        # Use search_messages as it's a simple read-only tool
         result = await client.call_tool(
             "call_extended_tool",
             arguments={
-                "tool_name": "list_contacts",
+                "tool_name": "search_messages",
                 "arguments": {
                     "project_key": "/tmp/test_project",
-                    "agent_name": "test_agent"
+                    "query": "test"
                 }
             }
         )
@@ -106,7 +108,7 @@ async def test_call_extended_tool_invalid_arguments(isolated_env):
             await client.call_tool(
                 "call_extended_tool",
                 arguments={
-                    "tool_name": "list_contacts",
+                    "tool_name": "search_messages",
                     "arguments": {
                         "wrong_arg": "value"
                     }
@@ -138,8 +140,8 @@ def test_core_and_extended_tools_disjoint():
 
 
 def test_extended_tools_count():
-    """Test that we have exactly 19 extended tools."""
-    assert len(EXTENDED_TOOLS) == 19, f"Expected 19 extended tools, but found {len(EXTENDED_TOOLS)}"
+    """Test that we have exactly 14 extended tools (after removing 5 contact-related tools)."""
+    assert len(EXTENDED_TOOLS) == 14, f"Expected 14 extended tools, but found {len(EXTENDED_TOOLS)}"
 
 
 def test_core_tools_count():

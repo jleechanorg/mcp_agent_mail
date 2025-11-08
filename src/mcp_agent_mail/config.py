@@ -132,10 +132,6 @@ class Settings:
     ack_escalation_claim_ttl_seconds: int
     ack_escalation_claim_exclusive: bool
     ack_escalation_claim_holder_name: str
-    # Contacts/links
-    contact_enforcement_enabled: bool
-    contact_auto_ttl_seconds: int
-    contact_auto_retry_enabled: bool
     # Logging
     log_rich_enabled: bool
     log_level: str
@@ -164,8 +160,6 @@ class Settings:
     # Messaging ergonomics
     # When true, attempt to register missing local recipients during send_message
     messaging_auto_register_recipients: bool
-    # When true, attempt a contact handshake automatically if delivery is blocked
-    messaging_auto_handshake_on_block: bool
     # Tool exposure mode: "extended" (all 27 tools, ~25k tokens) | "core" (8 core + 2 meta tools, ~10k tokens)
     tools_mode: str
 
@@ -307,9 +301,6 @@ def get_settings() -> Settings:
         log_rich_enabled=_bool(_decouple_config("LOG_RICH_ENABLED", default="true"), default=True),
         log_level=_decouple_config("LOG_LEVEL", default="INFO"),
         log_include_trace=_bool(_decouple_config("LOG_INCLUDE_TRACE", default="false"), default=False),
-        contact_enforcement_enabled=_bool(_decouple_config("CONTACT_ENFORCEMENT_ENABLED", default="false"), default=False),
-        contact_auto_ttl_seconds=_int(_decouple_config("CONTACT_AUTO_TTL_SECONDS", default="86400"), default=86400),
-        contact_auto_retry_enabled=_bool(_decouple_config("CONTACT_AUTO_RETRY_ENABLED", default="true"), default=True),
         log_json_enabled=_bool(_decouple_config("LOG_JSON_ENABLED", default="false"), default=False),
         tool_metrics_emit_enabled=_bool(_decouple_config("TOOL_METRICS_EMIT_ENABLED", default="false"), default=False),
         tool_metrics_emit_interval_seconds=_int(_decouple_config("TOOL_METRICS_EMIT_INTERVAL_SECONDS", default="60"), default=60),
@@ -325,7 +316,6 @@ def get_settings() -> Settings:
         ),
         agent_name_enforcement_mode=_agent_name_mode(_decouple_config("AGENT_NAME_ENFORCEMENT_MODE", default="coerce")),
         messaging_auto_register_recipients=_bool(_decouple_config("MESSAGING_AUTO_REGISTER_RECIPIENTS", default="true"), default=True),
-        messaging_auto_handshake_on_block=_bool(_decouple_config("MESSAGING_AUTO_HANDSHAKE_ON_BLOCK", default="true"), default=True),
         tools_mode=_tools_mode(_decouple_config("MCP_TOOLS_MODE", default="")),
     )
 

@@ -41,7 +41,8 @@ def _build_snapshot(tmp_path: Path) -> Path:
                 id INTEGER PRIMARY KEY,
                 project_id INTEGER,
                 name TEXT,
-                contact_policy TEXT DEFAULT 'auto'
+                is_active INTEGER DEFAULT 1,
+                deleted_ts TEXT
             );
             CREATE TABLE messages (
                 id INTEGER PRIMARY KEY,
@@ -1055,7 +1056,8 @@ def test_build_materialized_views(tmp_path: Path) -> None:
                 id INTEGER PRIMARY KEY,
                 project_id INTEGER,
                 name TEXT,
-                contact_policy TEXT DEFAULT 'auto'
+                is_active INTEGER DEFAULT 1,
+                deleted_ts TEXT
             );
             CREATE TABLE messages (
                 id INTEGER PRIMARY KEY,

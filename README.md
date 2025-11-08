@@ -18,6 +18,16 @@ These improvements make the system more efficient, flexible, and easier to use i
 
 ---
 
+## Installation
+
+Install from PyPI with uv (requires Python 3.11):
+
+```bash
+uv pip install mcp_mail
+```
+
+---
+
 A mail-like coordination layer for coding agents, exposed as an HTTP-only FastMCP server. It gives agents memorable identities, an inbox/outbox, searchable message history, and voluntary file reservation "leases" to avoid stepping on each other.
 
 Think of it as asynchronous email + directory + change-intent signaling for your agents, backed by Git (for human-auditable artifacts) and SQLite (for indexing and queries).
@@ -53,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/mcp_agent_mail/ma
 What this does:
 
 - Installs uv if missing and updates your PATH for this session
-- Creates a Python 3.14 virtual environment and installs dependencies with uv
+- Creates a Python 3.11 virtual environment and installs dependencies with uv
 - Runs the auto-detect integration to wire up supported agent tools
 - Starts the MCP HTTP server on port 8765 and prints a masked bearer token
 - Creates helper scripts under `scripts/` (including `run_server_with_token.sh`)
@@ -72,7 +82,7 @@ uv run python -m mcp_agent_mail.cli config set-port 9000
 
 ### If you want to do it yourself
 
-Clone the repo, set up and install with uv in a python 3.14 venv (install uv if you don't have it already), and then run `scripts/automatically_detect_all_installed_coding_agents_and_install_mcp_agent_mail_in_all.sh`. This will automatically set things up for your various installed coding agent tools and start the MCP server on port 8765. If you want to run the MCP server again in the future, simply run `scripts/run_server_with_token.sh`:
+Clone the repo, set up and install with uv in a Python 3.11 venv (install uv if you don't have it already), and then run `scripts/automatically_detect_all_installed_coding_agents_and_install_mcp_agent_mail_in_all.sh`. This will automatically set things up for your various installed coding agent tools and start the MCP server on port 8765. If you want to run the MCP server again in the future, simply run `scripts/run_server_with_token.sh`:
 
 ```bash
 # Install uv (if you don't have it already)
@@ -83,9 +93,9 @@ export PATH="$HOME/.local/bin:$PATH"
 git clone https://github.com/Dicklesworthstone/mcp_agent_mail
 cd mcp_agent_mail
 
-# Create a Python 3.14 virtual environment and install dependencies
-uv python install 3.14
-uv venv -p 3.14
+# Create a Python 3.11 virtual environment and install dependencies
+uv python install 3.11
+uv venv -p 3.11
 source .venv/bin/activate
 uv sync
 
@@ -1193,11 +1203,10 @@ Messages are GitHub-Flavored Markdown with JSON frontmatter (fenced by `---json`
 ### Data model (SQLite)
 
 - `projects(id, human_key, slug, created_at)`
-- `agents(id, project_id, name, program, model, task_description, inception_ts, last_active_ts, attachments_policy, contact_policy)`
+- `agents(id, project_id, name, program, model, task_description, inception_ts, last_active_ts, attachments_policy)`
 - `messages(id, project_id, sender_id, thread_id, subject, body_md, created_ts, importance, ack_required, attachments)`
 - `message_recipients(message_id, agent_id, kind, read_ts, ack_ts)`
 - `file_reservations(id, project_id, agent_id, path_pattern, exclusive, reason, created_ts, expires_ts, released_ts)`
-- `agent_links(id, a_project_id, a_agent_id, b_project_id, b_agent_id, status, reason, created_ts, updated_ts, expires_ts)`
 - `project_sibling_suggestions(id, project_a_id, project_b_id, score, status, rationale, created_ts, evaluated_ts, confirmed_ts, dismissed_ts)`
 - `fts_messages(message_id UNINDEXED, subject, body)` + triggers for incremental updates
 
@@ -1302,29 +1311,6 @@ Goal: make coordination "just work" without spam across unrelated agents. The se
 
 - All tools require a `project_key`. Agents only see messages addressed to them within that project.
 - An agent working in Project A is invisible to agents in Project B unless explicit cross-project contact is established (see below). This avoids distraction between unrelated repositories.
-
-### Policies (per agent) - OPTIONAL / NOT ENFORCED
-
-**NOTE: Contact policies are no longer enforced. All agents can send messages to each other directly without contact approval.**
-
-The following policy settings are maintained for backward compatibility but have no effect:
-
-- `open`: accept any targeted messages in the project.
-- `auto` (default): allow messages when there is obvious shared context.
-- `contacts_only`: require an approved contact link first.
-- `block_all`: reject all new contacts.
-
-Use `set_contact_policy(project_key, agent_name, policy)` to update (optional).
-
-### Request/approve contact - OPTIONAL / NOT REQUIRED
-
-**NOTE: Contact approval is no longer required to send messages. Use `send_message` directly.**
-
-The following tools are maintained for backward compatibility and optional contact tracking:
-
-- `request_contact(project_key, from_agent, to_agent, reason?, ttl_seconds?)` creates or refreshes a pending link and sends a small ack_required "intro" message to the recipient.
-- `respond_contact(project_key, to_agent, from_agent, accept, ttl_seconds?)` approves or denies; approval grants messaging until expiry.
-- `list_contacts(project_key, agent_name)` surfaces current links.
 
 ### Cross-project coordination (frontend vs backend repos)
 
@@ -1566,11 +1552,7 @@ result = await client.call_tool("list_extended_tools", {})
 | `ACK_ESCALATION_CLAIM_TTL_SECONDS` | `3600` | TTL for escalation file reservations |
 | `ACK_ESCALATION_CLAIM_EXCLUSIVE` | `false` | Make escalation file reservation exclusive |
 | `ACK_ESCALATION_CLAIM_HOLDER_NAME` |  | Ops agent name to own escalation file reservations |
-| `CONTACT_ENFORCEMENT_ENABLED` | `false` | (Deprecated - enforcement removed) |
-| `CONTACT_AUTO_TTL_SECONDS` | `86400` | TTL for auto-approved contacts (1 day) |
-| `CONTACT_AUTO_RETRY_ENABLED` | `true` | Auto-retry contact requests on policy violations |
 | `MESSAGING_AUTO_REGISTER_RECIPIENTS` | `true` | Automatically create missing local recipients during `send_message` and retry routing |
-| `MESSAGING_AUTO_HANDSHAKE_ON_BLOCK` | `true` | When contact policy blocks delivery, attempt a contact handshake (auto-accept) and retry |
 | `TOOLS_LOG_ENABLED` | `true` | Log tool invocations for debugging |
 | `LOG_RICH_ENABLED` | `true` | Enable Rich console logging |
 | `LOG_INCLUDE_TRACE` | `false` | Include trace-level logs |
@@ -1588,7 +1570,7 @@ result = await client.call_tool("list_extended_tools", {})
 
 ## Development quick start
 
-Prerequisite: complete the setup above (Python 3.14 + uv venv + uv sync).
+Prerequisite: complete the setup above (Python 3.11 + uv venv + uv sync).
 
 Dev helpers:
 
@@ -1745,10 +1727,6 @@ This section has been removed to keep the README focused. Client code samples be
 | `create_agent_identity` | `create_agent_identity(project_key: str, program: str, model: str, name_hint?: str, task_description?: str, attachments_policy?: str)` | Agent profile dict | Always creates a new unique agent |
 | `send_message` | `send_message(project_key: str, sender_name: str, to: list[str], subject: str, body_md: str, cc?: list[str], bcc?: list[str], attachment_paths?: list[str], convert_images?: bool, importance?: str, ack_required?: bool, thread_id?: str, auto_contact_if_blocked?: bool)` | `{deliveries: list, count: int, attachments?}` | Writes canonical + inbox/outbox, converts images |
 | `reply_message` | `reply_message(project_key: str, message_id: int, sender_name: str, body_md: str, to?: list[str], cc?: list[str], bcc?: list[str], subject_prefix?: str)` | `{thread_id, reply_to, deliveries: list, count: int, attachments?}` | Preserves/creates thread, inherits flags |
-| `request_contact` | `request_contact(project_key: str, from_agent: str, to_agent: str, to_project?: str, reason?: str, ttl_seconds?: int)` | Contact link dict | [OPTIONAL] Request permission to message another agent (no longer required) |
-| `respond_contact` | `respond_contact(project_key: str, to_agent: str, from_agent: str, accept: bool, from_project?: str, ttl_seconds?: int)` | Contact link dict | [OPTIONAL] Approve or deny a contact request (no longer required) |
-| `list_contacts` | `list_contacts(project_key: str, agent_name: str)` | `list[dict]` | [OPTIONAL] List contact links for an agent |
-| `set_contact_policy` | `set_contact_policy(project_key: str, agent_name: str, policy: str)` | Agent dict | [OPTIONAL] Set policy (not enforced) |
 | `fetch_inbox` | `fetch_inbox(project_key: str, agent_name: str, limit?: int, urgent_only?: bool, include_bodies?: bool, since_ts?: str)` | `list[dict]` | Non-mutating inbox read |
 | `mark_message_read` | `mark_message_read(project_key: str, agent_name: str, message_id: int)` | `{message_id, read, read_at}` | Per-recipient read receipt |
 | `acknowledge_message` | `acknowledge_message(project_key: str, agent_name: str, message_id: int)` | `{message_id, acknowledged, acknowledged_at, read_at}` | Sets ack and read |

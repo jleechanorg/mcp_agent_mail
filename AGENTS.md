@@ -8,7 +8,7 @@ RULE NUMBER 1 (NEVER EVER EVER FORGET THIS RULE!!!): YOU ARE NEVER ALLOWED TO DE
 4. **Mandatory explicit plan:** Even after explicit user authorization, restate the command verbatim, list exactly what will be affected, and wait for a confirmation that your understanding is correct. Only then may you execute it—if anything remains ambiguous, refuse and escalate.
 5. **Document the confirmation:** When running any approved destructive command, record (in the session notes / final response) the exact user text that authorized it, the command actually run, and the execution time. If that record is absent, the operation did not happen.
 
-We only use uv in this project, NEVER pip. And we use a venv. And we ONLY target Python 3.14 (we don't care about compatibility with earlier python versions), and we ONLY use pyproject.toml (not requirements.txt) for managing the project.
+We install everything via **uv** (including `uv pip ...`), NEVER raw `pip`. Always work inside a venv. We target **Python 3.11+** (the codebase is tested on 3.11, 3.12, 3.13, and 3.14), and we ONLY use `pyproject.toml` (not `requirements.txt`) for managing the project.
 
 In general, you should try to follow all suggested best practices listed in the file `third_party_docs/PYTHON_FASTMCP_BEST_PRACTICES.md`
 
@@ -104,10 +104,10 @@ How to use effectively
 
 2) Across different repos in one project (e.g., Next.js frontend + FastAPI backend)
    - Option A (single project bus): register both sides under the same `project_key` (shared key/path). Keep reservation patterns specific (e.g., `frontend/**` vs `backend/**`).
-   - Option B (separate projects): each repo has its own `project_key`; use `macro_contact_handshake` or `request_contact`/`respond_contact` to link agents, then message directly. Keep a shared `thread_id` (e.g., ticket key) across repos for clean summaries/audits.
+   - Option B (separate projects): each repo has its own `project_key`; agents can message directly using cross-project addressing. Keep a shared `thread_id` (e.g., ticket key) across repos for clean summaries/audits.
 
 Macros vs granular tools
-- Prefer macros when you want speed or are on a smaller model: `macro_start_session`, `macro_prepare_thread`, `macro_file_reservation_cycle`, `macro_contact_handshake`.
+- Prefer macros when you want speed or are on a smaller model: `macro_start_session`, `macro_prepare_thread`, `macro_file_reservation_cycle`.
 - Use granular tools when you need control: `register_agent`, `file_reservation_paths`, `send_message`, `fetch_inbox`, `acknowledge_message`.
 
 Common pitfalls

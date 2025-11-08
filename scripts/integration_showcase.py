@@ -5,8 +5,8 @@ Extremely verbose, standalone integration walk-through for mcp-agent-mail.
 This script does **not** rely on pytest. Instead, it spins up an in-memory FastMCP
 server instance and drives realistic multi-agent workflows across multiple projects.
 The output leans heavily on Rich so humans (or supervising agents) can follow every
-step: environment bootstrap, project setup, identity registration, file reservations, contact
-handshakes, messaging, acknowledgements, and search/summarisation flows.
+step: environment bootstrap, project setup, identity registration, file reservations,
+messaging, acknowledgements, and search/summarisation flows.
 
 Usage
 -----
@@ -160,7 +160,6 @@ def _build_environment() -> dict[str, Any]:
         "HTTP_RBAC_ENABLED": "false",
         "LLM_ENABLED": "false",
         "FILE_RESERVATIONS_ENFORCEMENT_ENABLED": "true",
-        "CONTACT_ENFORCEMENT_ENABLED": "false",
         "TOOL_METRICS_EMIT_ENABLED": "false",
     }
 
@@ -287,7 +286,7 @@ async def run() -> None:
                 """\
 **Goal:** Demonstrate end-to-end agent collaboration spanning
 - a shared backend repo (co-edit file reservation flow),
-- a sibling frontend repo (cross-project contact & messaging),
+- a sibling frontend repo (cross-project messaging),
 - and an unrelated data project (isolation sanity check).
 
 Every tool call is narrated before execution, inputs/outputs are syntax highlighted, and a message timeline is produced at the end."""
@@ -577,105 +576,9 @@ Every tool call is narrated before execution, inputs/outputs are syntax highligh
             stepper.capture_message(payload=reply.data, project=projects["backend"].label, summary="GreenStone confirms task ownership.")
 
         # ------------------------------------------------------------------ #
-        # Cross-project contact (backend ↔ frontend)
+        # Cross-project messaging (backend ↔ frontend)
         # ------------------------------------------------------------------ #
-        console.print(Rule("Cross-project contact handshake", style="magenta"))
-
-        await stepper.call_tool(
-            actor=agents["blue"].codename,
-            project_label=projects["backend"].label,
-            tool="request_contact",
-            description="BlueLake requests permission to coordinate with OrangeHill in the frontend repo.",
-            arguments={
-                "project_key": projects["backend"].human_key,
-                "from_agent": agents["blue"].codename,
-                "to_agent": agents["orange"].codename,
-                "to_project": projects["frontend"].human_key,
-                "reason": "Need to align auth UI changes with backend token rollout.",
-            },
-        )
-        stepper.capture_message(
-            payload={
-                "id": int(datetime.now().timestamp()),
-                "from": agents["blue"].codename,
-                "to": [agents["orange"].codename],
-                "subject": "Contact request",
-                "thread_id": None,
-                "importance": "normal",
-                "ack_required": True,
-                "created": datetime.now().isoformat(),
-            },
-            project=projects["frontend"].label,
-            summary="Automated contact request notification.",
-        )
-
-        await stepper.call_tool(
-            actor=agents["orange"].codename,
-            project_label=projects["frontend"].label,
-            tool="fetch_inbox",
-            description="OrangeHill checks inbox to review the contact request.",
-            arguments={
-                "project_key": projects["frontend"].human_key,
-                "agent_name": agents["orange"].codename,
-                "include_bodies": True,
-                "limit": 5,
-            },
-        )
-
-        await stepper.call_tool(
-            actor=agents["orange"].codename,
-            project_label=projects["frontend"].label,
-            tool="respond_contact",
-            description="OrangeHill approves the contact request, allowing backend ↔ frontend messages.",
-            arguments={
-                "project_key": projects["frontend"].human_key,
-                "to_agent": agents["orange"].codename,
-                "from_agent": agents["blue"].codename,
-                "from_project": projects["backend"].human_key,
-                "accept": True,
-                "ttl_seconds": 7 * 24 * 3600,
-            },
-        )
-
-        await stepper.call_tool(
-            actor=agents["orange"].codename,
-            project_label=projects["frontend"].label,
-            tool="request_contact",
-            description="OrangeHill reciprocates by requesting direct contact back to the backend project.",
-            arguments={
-                "project_key": projects["frontend"].human_key,
-                "from_agent": agents["orange"].codename,
-                "to_agent": agents["blue"].codename,
-                "to_project": projects["backend"].human_key,
-                "reason": "Need backend API status updates while iterating on login UI.",
-            },
-        )
-
-        await stepper.call_tool(
-            actor=agents["blue"].codename,
-            project_label=projects["backend"].label,
-            tool="respond_contact",
-            description="BlueLake approves the reciprocal contact request.",
-            arguments={
-                "project_key": projects["backend"].human_key,
-                "to_agent": agents["blue"].codename,
-                "from_agent": agents["orange"].codename,
-                "from_project": projects["frontend"].human_key,
-                "accept": True,
-                "ttl_seconds": 7 * 24 * 3600,
-            },
-        )
-
-        await stepper.call_tool(
-            actor=agents["blue"].codename,
-            project_label=projects["backend"].label,
-            tool="list_contacts",
-            description="BlueLake audits approved outbound contacts.",
-            arguments={
-                "project_key": projects["backend"].human_key,
-                "agent_name": agents["blue"].codename,
-            },
-        )
+        console.print(Rule("Cross-project messaging", style="magenta"))
 
         cross_project = await stepper.call_tool(
             actor=agents["blue"].codename,
@@ -709,7 +612,7 @@ Every tool call is narrated before execution, inputs/outputs are syntax highligh
             actor=agents["orange"].codename,
             project_label=projects["frontend"].label,
             tool="fetch_inbox",
-            description="OrangeHill receives the cross-project message after contact approval.",
+            description="OrangeHill receives the cross-project message.",
             arguments={
                 "project_key": projects["frontend"].human_key,
                 "agent_name": agents["orange"].codename,
@@ -819,7 +722,7 @@ Every tool call is narrated before execution, inputs/outputs are syntax highligh
                     """\
 ### Key Observations
 - File reservations prevented overlapping backend work without blocking alternative surfaces.
-- Contact handshake enabled cross-project routing with clear audit trail.
+- Cross-project messaging enabled coordination between frontend and backend with clear audit trail.
 - Message acknowledgements and replies stayed scoped to their originating projects.
 - Search & summaries surfaced the negotiated plan for downstream agents."""
                 ),

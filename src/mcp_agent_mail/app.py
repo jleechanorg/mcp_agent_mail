@@ -32,7 +32,7 @@ from .config import Settings, get_settings
 from .db import ensure_schema, get_session, init_engine
 from .guard import install_guard as install_guard_script, uninstall_guard as uninstall_guard_script
 from .llm import complete_system_user
-from .models import Agent, AgentLink, FileReservation, Message, MessageRecipient, Project, ProjectSiblingSuggestion
+from .models import Agent, FileReservation, Message, MessageRecipient, Project, ProjectSiblingSuggestion
 from .storage import (
     ProjectArchive,
     archive_write_lock,
@@ -58,7 +58,6 @@ RECENT_TOOL_USAGE: deque[tuple[datetime, str, Optional[str], Optional[str]]] = d
 CLUSTER_SETUP = "infrastructure"
 CLUSTER_IDENTITY = "identity"
 CLUSTER_MESSAGING = "messaging"
-CLUSTER_CONTACT = "contact"
 CLUSTER_SEARCH = "search"
 CLUSTER_FILE_RESERVATIONS = "file_reservations"
 CLUSTER_MACROS = "workflow_macros"
@@ -1459,6 +1458,7 @@ async def _ensure_cross_project_link(
         return link
 
 
+
 async def _lookup_agents_any_project(name: str, include_inactive: bool = False) -> list[tuple[Project, Agent]]:
     """Return all (project, agent) pairs matching a given agent name globally."""
 
@@ -2328,10 +2328,6 @@ EXTENDED_TOOLS = {
     "delete_agent",
     "acknowledge_message",
     "search_messages",
-    "request_contact",
-    "respond_contact",
-    "list_contacts",
-    "set_contact_policy",
     "file_reservation_paths",
     "release_file_reservations",
     "force_release_file_reservation",
@@ -2341,7 +2337,6 @@ EXTENDED_TOOLS = {
     "macro_start_session",
     "macro_prepare_thread",
     "macro_file_reservation_cycle",
-    "macro_contact_handshake",
     "install_precommit_guard",
     "uninstall_precommit_guard",
 }
@@ -2352,10 +2347,6 @@ EXTENDED_TOOL_METADATA = {
     "search_messages": {"category": "search", "description": "Full-text search over subject and body"},
     "create_agent_identity": {"category": "identity", "description": "Create a new unique agent identity"},
     "delete_agent": {"category": "identity", "description": "Permanently delete an agent and related records (destructive, irreversible)"},
-    "request_contact": {"category": "contact", "description": "Request contact approval to message another agent"},
-    "respond_contact": {"category": "contact", "description": "Approve or deny a contact request"},
-    "list_contacts": {"category": "contact", "description": "List contact links for an agent"},
-    "set_contact_policy": {"category": "contact", "description": "Set contact policy (open/auto/contacts_only/block_all)"},
     "file_reservation_paths": {"category": "file_reservations", "description": "Reserve file paths/globs for exclusive or shared access"},
     "release_file_reservations": {"category": "file_reservations", "description": "Release active file reservations"},
     "force_release_file_reservation": {"category": "file_reservations", "description": "Force-release stale reservation from another agent"},
@@ -2365,7 +2356,6 @@ EXTENDED_TOOL_METADATA = {
     "macro_start_session": {"category": "workflow_macros", "description": "Boot project session with registration and inbox fetch"},
     "macro_prepare_thread": {"category": "workflow_macros", "description": "Align agent with existing thread context"},
     "macro_file_reservation_cycle": {"category": "workflow_macros", "description": "Reserve and optionally release file paths in one operation"},
-    "macro_contact_handshake": {"category": "workflow_macros", "description": "Request contact and optionally auto-approve with welcome message"},
     "install_precommit_guard": {"category": "infrastructure", "description": "Install pre-commit guard for a code repository"},
     "uninstall_precommit_guard": {"category": "infrastructure", "description": "Remove pre-commit guard from repository"},
 }
@@ -3633,266 +3623,6 @@ def build_mcp_server() -> FastMCP:
             result.setdefault("attachments", payload.get("attachments"))
         return result
 
-    @mcp.tool(name="request_contact")
-    @_instrument_tool(
-        "request_contact",
-        cluster=CLUSTER_CONTACT,
-        capabilities={"contact"},
-        project_arg="project_key",
-        agent_arg="from_agent",
-    )
-    async def request_contact(
-        ctx: Context,
-        project_key: str,
-        from_agent: str,
-        to_agent: str,
-        to_project: Optional[str] = None,
-        reason: str = "",
-        ttl_seconds: int = 7 * 24 * 3600,
-        # Optional quality-of-life flags; ignored by clients that don't pass them
-        register_if_missing: bool = True,
-        program: Optional[str] = None,
-        model: Optional[str] = None,
-        task_description: Optional[str] = None,
-    ) -> dict[str, Any]:
-        """[OPTIONAL] Request contact approval to message another agent.
-
-        NOTE: Contact approval is no longer required to send messages. Agents can send messages
-        directly using send_message without requesting contact first. This tool is maintained
-        for backward compatibility and optional use cases where explicit contact tracking is desired.
-
-        Creates (or refreshes) a pending AgentLink and sends a small ack_required intro message.
-
-        Discovery
-        ---------
-        To discover available agent names, use: resource://agents/{project_key}
-        Agent names are NOT the same as program names or user names.
-
-        Parameters
-        ----------
-        project_key : str
-            Project slug or human key.
-        from_agent : str
-            Your agent name (must be registered in the project).
-        to_agent : str
-            Target agent name (use resource://agents/{project_key} to discover names).
-        to_project : Optional[str]
-            Target project if different from your project (cross-project coordination).
-        reason : str
-            Optional explanation for the contact request.
-        ttl_seconds : int
-            Time to live for the contact approval request (default: 7 days).
-        """
-        project = await _get_project_by_identifier(project_key)
-        settings = get_settings()
-        a = await _get_agent(project, from_agent)
-        # Allow explicit external addressing in to_agent as project:<slug>#<Name>
-        target_project = project
-        target_name = to_agent
-        if to_project:
-            target_project = await _get_project_by_identifier(to_project)
-        elif to_agent.startswith("project:") and "#" in to_agent:
-            try:
-                _, rest = to_agent.split(":", 1)
-                slug_part, agent_part = rest.split("#", 1)
-                target_project = await _get_project_by_identifier(slug_part)
-                target_name = agent_part.strip()
-            except Exception:
-                target_project = project
-                target_name = to_agent
-        try:
-            b = await _get_agent(target_project, target_name)
-        except NoResultFound:
-            cleaned_target = sanitize_agent_name(target_name or "")
-            if register_if_missing and cleaned_target:
-                b = await _get_or_create_agent(
-                    target_project,
-                    target_name,
-                    program or "unknown",
-                    model or "unknown",
-                    task_description or "",
-                    settings,
-                )
-            else:
-                raise
-        now = datetime.now(timezone.utc)
-        exp = now + timedelta(seconds=max(60, ttl_seconds))
-        async with get_session() as s:
-            # upsert link
-            existing = await s.execute(
-                select(AgentLink).where(
-                    AgentLink.a_project_id == project.id,
-                    AgentLink.a_agent_id == a.id,
-                    AgentLink.b_project_id == target_project.id,
-                    AgentLink.b_agent_id == b.id,
-                )
-            )
-            link = existing.scalars().first()
-            if link:
-                link.status = "pending"
-                link.reason = reason
-                link.updated_ts = now
-                link.expires_ts = exp
-                s.add(link)
-            else:
-                link = AgentLink(
-                    a_project_id=project.id or 0,
-                    a_agent_id=a.id or 0,
-                    b_project_id=target_project.id or 0,
-                    b_agent_id=b.id or 0,
-                    status="pending",
-                    reason=reason,
-                    created_ts=now,
-                    updated_ts=now,
-                    expires_ts=exp,
-                )
-                s.add(link)
-            await s.commit()
-        # Send an intro message with ack_required
-        subject = f"Contact request from {a.name}"
-        body = reason or f"{a.name} requests permission to contact {b.name}."
-        await _deliver_message(
-            ctx,
-            "request_contact",
-            target_project,
-            a,
-            [b.name],
-            [],
-            [],
-            subject,
-            body,
-            None,
-            None,
-            importance="normal",
-            ack_required=True,
-            thread_id=None,
-        )
-        return {"from": a.name, "from_project": project.human_key, "to": b.name, "to_project": target_project.human_key, "status": "pending", "expires_ts": _iso(exp)}
-
-    @mcp.tool(name="respond_contact")
-    @_instrument_tool(
-        "respond_contact",
-        cluster=CLUSTER_CONTACT,
-        capabilities={"contact"},
-        project_arg="project_key",
-        agent_arg="to_agent",
-    )
-    async def respond_contact(
-        ctx: Context,
-        project_key: str,
-        to_agent: str,
-        from_agent: str,
-        accept: bool,
-        ttl_seconds: int = 30 * 24 * 3600,
-        from_project: Optional[str] = None,
-    ) -> dict[str, Any]:
-        """[OPTIONAL] Approve or deny a contact request.
-
-        NOTE: Contact approval is no longer required to send messages. This tool is maintained
-        for backward compatibility and optional use cases where explicit contact tracking is desired.
-        """
-        project = await _get_project_by_identifier(project_key)
-        # Resolve remote requestor project if provided
-        a_project = project if not from_project else await _get_project_by_identifier(from_project)
-        a = await _get_agent(a_project, from_agent)
-        b = await _get_agent(project, to_agent)
-        now = datetime.now(timezone.utc)
-        exp = now + timedelta(seconds=max(60, ttl_seconds)) if accept else None
-        updated = 0
-        async with get_session() as s:
-            existing = await s.execute(
-                select(AgentLink).where(
-                    AgentLink.a_project_id == a_project.id,
-                    AgentLink.a_agent_id == a.id,
-                    AgentLink.b_project_id == project.id,
-                    AgentLink.b_agent_id == b.id,
-                )
-            )
-            link = existing.scalars().first()
-            if link:
-                link.status = "approved" if accept else "blocked"
-                link.updated_ts = now
-                link.expires_ts = exp
-                s.add(link)
-                updated = 1
-            else:
-                if accept:
-                    s.add(AgentLink(
-                        a_project_id=project.id or 0,
-                        a_agent_id=a.id or 0,
-                        b_project_id=project.id or 0,
-                        b_agent_id=b.id or 0,
-                        status="approved",
-                        reason="",
-                        created_ts=now,
-                        updated_ts=now,
-                        expires_ts=exp,
-                    ))
-                    updated = 1
-            await s.commit()
-        await ctx.info(f"Contact {'approved' if accept else 'denied'}: {from_agent} -> {to_agent}")
-        return {"from": from_agent, "to": to_agent, "approved": bool(accept), "expires_ts": _iso(exp) if exp else None, "updated": updated}
-
-    @mcp.tool(name="list_contacts")
-    @_instrument_tool(
-        "list_contacts",
-        cluster=CLUSTER_CONTACT,
-        capabilities={"contact", "audit"},
-        project_arg="project_key",
-        agent_arg="agent_name",
-    )
-    async def list_contacts(ctx: Context, project_key: str, agent_name: str) -> list[dict[str, Any]]:
-        """[OPTIONAL] List contact links for an agent in a project.
-
-        NOTE: Contact approval is no longer required to send messages. This tool is maintained
-        for backward compatibility and optional contact tracking.
-        """
-        project = await _get_project_by_identifier(project_key)
-        agent = await _get_agent(project, agent_name)
-        out: list[dict[str, Any]] = []
-        async with get_session() as s:
-            rows = await s.execute(
-                select(AgentLink, Agent.name)
-                .join(Agent, Agent.id == AgentLink.b_agent_id)
-                .where(AgentLink.a_project_id == project.id, AgentLink.a_agent_id == agent.id)
-            )
-            for link, name in rows.all():
-                out.append({
-                    "to": name,
-                    "status": link.status,
-                    "reason": link.reason,
-                    "updated_ts": _iso(link.updated_ts),
-                    "expires_ts": _iso(link.expires_ts) if link.expires_ts else None,
-                })
-        return out
-
-    @mcp.tool(name="set_contact_policy")
-    @_instrument_tool(
-        "set_contact_policy",
-        cluster=CLUSTER_CONTACT,
-        capabilities={"contact", "configure"},
-        project_arg="project_key",
-        agent_arg="agent_name",
-    )
-    async def set_contact_policy(ctx: Context, project_key: str, agent_name: str, policy: str) -> dict[str, Any]:
-        """[OPTIONAL] Set contact policy for an agent: open | auto | contacts_only | block_all.
-
-        NOTE: Contact policies are no longer enforced. This tool is maintained for backward
-        compatibility. All agents can send messages to each other regardless of policy settings.
-        """
-        project = await _get_project_by_identifier(project_key)
-        agent = await _get_agent(project, agent_name)
-        pol = (policy or "auto").lower()
-        if pol not in {"open", "auto", "contacts_only", "block_all"}:
-            pol = "auto"
-        async with get_session() as s:
-            db_agent = await s.get(Agent, agent.id)
-            if db_agent:
-                db_agent.contact_policy = pol
-                s.add(db_agent)
-                await s.commit()
-        return {"agent": agent.name, "policy": pol}
-
     @mcp.tool(name="fetch_inbox")
     @_instrument_tool(
         "fetch_inbox",
@@ -4287,149 +4017,6 @@ def build_mcp_server() -> FastMCP:
         return {
             "file_reservations": file_reservations_result,
             "released": release_result,
-        }
-
-    @mcp.tool(name="macro_contact_handshake")
-    @_instrument_tool(
-        "macro_contact_handshake",
-        cluster=CLUSTER_MACROS,
-        capabilities={"workflow", "contact", "messaging"},
-        project_arg="project_key",
-        agent_arg="requester",
-    )
-    async def macro_contact_handshake(
-        ctx: Context,
-        project_key: str,
-        requester: Optional[str] = None,
-        target: Optional[str] = None,
-        reason: str = "",
-        ttl_seconds: int = 7 * 24 * 3600,
-        auto_accept: bool = False,
-        welcome_subject: Optional[str] = None,
-        welcome_body: Optional[str] = None,
-        to_project: Optional[str] = None,
-        # Aliases for compatibility
-        agent_name: Optional[str] = None,
-        to_agent: Optional[str] = None,
-        register_if_missing: bool = True,
-        program: Optional[str] = None,
-        model: Optional[str] = None,
-        task_description: Optional[str] = None,
-        thread_id: Optional[str] = None,
-    ) -> dict[str, Any]:
-        """[OPTIONAL] Request contact permissions and optionally auto-approve plus send a welcome message.
-
-        NOTE: Contact approval is no longer required to send messages. This tool is maintained
-        for backward compatibility. You can simply use send_message directly without any contact handshake.
-        """
-
-        # Resolve aliases
-        real_requester = (requester or agent_name or "").strip()
-        real_target = (target or to_agent or "").strip()
-        target_project_key = (to_project or "").strip()
-        if not real_requester or not real_target:
-            # Best-effort inference to honor "obvious intent"
-            try:
-                project = await _get_project_by_identifier(project_key)
-                # If requester missing and exactly one agent exists in project, assume that one
-                if not real_requester and project.id is not None:
-                    async with get_session() as s:
-                        rows = await s.execute(select(Agent.name).where(Agent.project_id == project.id))
-                        names = [str(row[0]).strip() for row in rows.fetchall() if (row and row[0])]
-                    if len(names) == 1:
-                        real_requester = names[0]
-                # If target missing and exactly two agents exist, infer the other
-                if not real_target and project.id is not None:
-                    async with get_session() as s2:
-                        rows2 = await s2.execute(select(Agent.name).where(Agent.project_id == project.id))
-                        names2 = [str(row[0]).strip() for row in rows2.fetchall() if (row and row[0])]
-                    if real_requester and len(names2) == 2 and real_requester in names2:
-                        real_target = next((n for n in names2 if n != real_requester), real_target)
-            except Exception:
-                pass
-        if not real_requester or not real_target:
-            raise ToolExecutionError(
-                "INVALID_ARGUMENT",
-                "macro_contact_handshake requires requester/agent_name and target/to_agent",
-                recoverable=True,
-                data={
-                    "requester": real_requester or requester,
-                    "agent_name": agent_name,
-                    "target": real_target or target,
-                    "to_agent": to_agent,
-                    "suggested_tool_calls": [
-                        {
-                            "tool": "macro_contact_handshake",
-                            "arguments": {
-                                "project_key": project_key,
-                                "requester": real_requester or "<your_agent>",
-                                "target": real_target or "<their_agent>",
-                                "auto_accept": True,
-                                "ttl_seconds": ttl_seconds,
-                            },
-                        }
-                    ],
-                },
-            )
-
-        from fastmcp.tools.tool import FunctionTool
-        request_tool = cast(FunctionTool, cast(Any, request_contact))
-        request_payload: dict[str, Any] = {
-            "project_key": project_key,
-            "from_agent": real_requester,
-            "to_agent": real_target,
-            "reason": reason,
-            "ttl_seconds": ttl_seconds,
-        }
-        if target_project_key:
-            request_payload["to_project"] = target_project_key
-        if register_if_missing:
-            request_payload["register_if_missing"] = True
-        if program:
-            request_payload["program"] = program
-        if model:
-            request_payload["model"] = model
-        if task_description:
-            request_payload["task_description"] = task_description
-        request_tool_result = await request_tool.run(request_payload)
-        request_result = cast(dict[str, Any], request_tool_result.structured_content or {})
-
-        response_result = None
-        if auto_accept:
-            respond_tool = cast(FunctionTool, cast(Any, respond_contact))
-            respond_payload: dict[str, Any] = {
-                "project_key": target_project_key or project_key,
-                "to_agent": real_target,
-                "from_agent": real_requester,
-                "accept": True,
-                "ttl_seconds": ttl_seconds,
-            }
-            if target_project_key:
-                respond_payload["from_project"] = project_key
-            respond_tool_result = await respond_tool.run(respond_payload)
-            response_result = cast(dict[str, Any], respond_tool_result.structured_content or {})
-
-        welcome_result = None
-        if welcome_subject and welcome_body and not target_project_key:
-            try:
-                send_tool = cast(FunctionTool, cast(Any, send_message))
-                send_tool_result = await send_tool.run({
-                    "project_key": project_key,
-                    "sender_name": real_requester,
-                    "to": [real_target],
-                    "subject": welcome_subject,
-                    "body_md": welcome_body,
-                    "thread_id": thread_id,
-                })
-                welcome_result = cast(dict[str, Any], send_tool_result.structured_content or {})
-            except ToolExecutionError as exc:
-                # surface but do not abort handshake
-                await ctx.debug(f"macro_contact_handshake failed to send welcome: {exc}")
-
-        return {
-            "request": request_result,
-            "response": response_result,
-            "welcome_message": welcome_result,
         }
 
     @mcp.tool(name="search_messages")
@@ -5421,15 +5008,6 @@ def build_mcp_server() -> FastMCP:
                         "required_capabilities": ["identity", "audit"],
                         "usage_examples": [{"hint": "Directory lookup", "sample": "whois(project_key='backend', agent_name='BlueLake')"}],
                     },
-                    {
-                        "name": "set_contact_policy",
-                        "summary": "Set inbound contact policy (open, auto, contacts_only, block_all).",
-                        "use_when": "Adjusting how permissive an agent is about unsolicited messages.",
-                        "related": ["request_contact", "respond_contact"],
-                        "expected_frequency": "Occasional configuration change.",
-                        "required_capabilities": ["contact"],
-                        "usage_examples": [{"hint": "Restrict inbox", "sample": "set_contact_policy(project_key='backend', agent_name='BlueLake', policy='contacts_only')"}],
-                    },
                 ],
             },
             {
@@ -5440,7 +5018,7 @@ def build_mcp_server() -> FastMCP:
                         "name": "send_message",
                         "summary": "Deliver a new message with attachments, WebP conversion, and policy enforcement.",
                         "use_when": "Starting new threads or broadcasting plans across projects.",
-                        "related": ["reply_message", "request_contact"],
+                        "related": ["reply_message"],
                         "expected_frequency": "Frequent—core write operation.",
                         "required_capabilities": ["messaging"],
                         "usage_examples": [{"hint": "New plan", "sample": "send_message(project_key='backend', sender_name='GreenCastle', to=['BlueLake'], subject='Plan', body_md='...')"}],
@@ -5480,39 +5058,6 @@ def build_mcp_server() -> FastMCP:
                         "expected_frequency": "Each time a message requests acknowledgement.",
                         "required_capabilities": ["messaging", "ack"],
                         "usage_examples": [{"hint": "Ack", "sample": "acknowledge_message(project_key='backend', agent_name='BlueLake', message_id=42)"}],
-                    },
-                ],
-            },
-            {
-                "name": "Contact Governance",
-                "purpose": "Manage messaging permissions when policies are not open by default.",
-                "tools": [
-                    {
-                        "name": "request_contact",
-                        "summary": "Create or refresh a pending AgentLink and notify the target with ack_required intro.",
-                        "use_when": "Requesting permission before messaging another agent.",
-                        "related": ["respond_contact", "set_contact_policy"],
-                        "expected_frequency": "Occasional—when new communication lines are needed.",
-                        "required_capabilities": ["contact"],
-                        "usage_examples": [{"hint": "Ask permission", "sample": "request_contact(project_key='backend', from_agent='OpsBot', to_agent='BlueLake')"}],
-                    },
-                    {
-                        "name": "respond_contact",
-                        "summary": "Approve or block a pending contact request, optionally setting expiry.",
-                        "use_when": "Granting or revoking messaging permissions.",
-                        "related": ["request_contact"],
-                        "expected_frequency": "As often as requests arrive.",
-                        "required_capabilities": ["contact"],
-                        "usage_examples": [{"hint": "Approve", "sample": "respond_contact(project_key='backend', to_agent='BlueLake', from_agent='OpsBot', accept=True)"}],
-                    },
-                    {
-                        "name": "list_contacts",
-                        "summary": "List outbound contact links, statuses, and expirations for an agent.",
-                        "use_when": "Auditing who an agent may message or rotating expiring approvals.",
-                        "related": ["request_contact", "respond_contact"],
-                        "expected_frequency": "Periodic audits or dashboards.",
-                        "required_capabilities": ["contact", "audit"],
-                        "usage_examples": [{"hint": "Audit", "sample": "list_contacts(project_key='backend', agent_name='BlueLake')"}],
                     },
                 ],
             },
@@ -5613,15 +5158,6 @@ def build_mcp_server() -> FastMCP:
                         "required_capabilities": ["workflow", "file_reservations", "repository"],
                         "usage_examples": [{"hint": "FileReservation & release", "sample": "macro_file_reservation_cycle(project_key='backend', agent_name='BlueLake', paths=['src/app.py'], auto_release=true)"}],
                     },
-                    {
-                        "name": "macro_contact_handshake",
-                        "summary": "Request contact approval, optionally auto-accept, and send a welcome message.",
-                        "use_when": "Spinning up collaboration between two agents who lack permissions.",
-                        "related": ["request_contact", "respond_contact", "send_message"],
-                        "expected_frequency": "When onboarding new agent pairs.",
-                        "required_capabilities": ["workflow", "contact", "messaging"],
-                        "usage_examples": [{"hint": "Automated handshake", "sample": "macro_contact_handshake(project_key='backend', requester='OpsBot', target='BlueLake', auto_accept=true, welcome_subject='Hello', welcome_body='Excited to collaborate!')"}],
-                    },
                 ],
             },
         ]
@@ -5654,10 +5190,6 @@ def build_mcp_server() -> FastMCP:
                 "workflow": "Join existing discussion",
                 "sequence": ["macro_prepare_thread", "reply_message", "acknowledge_message"],
             },
-            {
-                "workflow": "Manage contact approvals",
-                "sequence": ["set_contact_policy", "request_contact", "respond_contact", "send_message"],
-            },
         ]
 
         return {
@@ -5686,14 +5218,6 @@ def build_mcp_server() -> FastMCP:
                         "bcc": "list[str] | str",
                         "importance": "low|normal|high|urgent",
                         "auto_contact_if_blocked": "bool",
-                    },
-                },
-                "macro_contact_handshake": {
-                    "required": ["project_key", "requester|agent_name", "target|to_agent"],
-                    "optional": ["reason", "ttl_seconds", "auto_accept", "welcome_subject", "welcome_body"],
-                    "aliases": {
-                        "requester": ["agent_name"],
-                        "target": ["to_agent"],
                     },
                 },
             },
@@ -5902,8 +5426,9 @@ def build_mcp_server() -> FastMCP:
         Notes
         -----
         - Agent names are NOT the same as your program name or user name.
-        - Use the returned names when calling tools like whois(), request_contact(), send_message().
-        - Agents in different projects cannot see each other - project isolation is enforced.
+        - Use the returned names when calling tools like whois(), send_message().
+        - This directory lists agents registered in the specified project.
+        - Note: Agent names are globally unique and cross-project messaging is allowed.
         """
         project = await _get_project_by_identifier(project_key)
         await ensure_schema()
@@ -6773,10 +6298,6 @@ def build_mcp_server() -> FastMCP:
         "create_agent_identity": create_agent_identity,
         "delete_agent": delete_agent,
         "search_messages": search_messages,
-        "request_contact": request_contact,
-        "respond_contact": respond_contact,
-        "list_contacts": list_contacts,
-        "set_contact_policy": set_contact_policy,
         "file_reservation_paths": file_reservation_paths,
         "release_file_reservations": release_file_reservations_tool,
         "force_release_file_reservation": force_release_file_reservation,
@@ -6786,7 +6307,6 @@ def build_mcp_server() -> FastMCP:
         "macro_start_session": macro_start_session,
         "macro_prepare_thread": macro_prepare_thread,
         "macro_file_reservation_cycle": macro_file_reservation_cycle,
-        "macro_contact_handshake": macro_contact_handshake,
         "install_precommit_guard": install_precommit_guard,
         "uninstall_precommit_guard": uninstall_precommit_guard,
     })
