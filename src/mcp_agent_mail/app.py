@@ -5180,7 +5180,8 @@ def build_mcp_server() -> FastMCP:
         -----
         - Agent names are NOT the same as your program name or user name.
         - Use the returned names when calling tools like whois(), send_message().
-        - Agents in different projects cannot see each other - project isolation is enforced.
+        - This directory lists agents registered in the specified project.
+        - Note: Agent names are globally unique and cross-project messaging is allowed.
         """
         project = await _get_project_by_identifier(project_key)
         await ensure_schema()

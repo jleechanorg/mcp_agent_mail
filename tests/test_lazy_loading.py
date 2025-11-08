@@ -140,8 +140,8 @@ def test_core_and_extended_tools_disjoint():
 
 
 def test_extended_tools_count():
-    """Test that we have exactly 19 extended tools."""
-    assert len(EXTENDED_TOOLS) == 19, f"Expected 19 extended tools, but found {len(EXTENDED_TOOLS)}"
+    """Test that we have exactly 14 extended tools (after removing 5 contact-related tools)."""
+    assert len(EXTENDED_TOOLS) == 14, f"Expected 14 extended tools, but found {len(EXTENDED_TOOLS)}"
 
 
 def test_core_tools_count():
