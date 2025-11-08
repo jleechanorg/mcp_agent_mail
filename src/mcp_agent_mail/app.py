@@ -3352,7 +3352,7 @@ def build_mcp_server() -> FastMCP:
                             proj = await _get_project_by_identifier(target_project)
                             agent = await _get_agent(proj, target_name)
                             resolved = agent.name  # Agent names are globally unique
-                        except Exception:
+                        except NoResultFound:
                             resolved = None
                     else:
                         # Global lookup by name (returns canonical name)
