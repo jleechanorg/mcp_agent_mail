@@ -4,6 +4,18 @@
 
 > "It's like gmail for your coding agents!"
 
+---
+
+## ⚠️ DEPRECATED - Repository Moved
+
+**This repository is deprecated.** Please use the new repository at:
+
+### **https://github.com/jleechanorg/mcp_mail**
+
+Due to issues with Codex web functionality, this fork was copied to a fresh repository to ensure proper functionality and maintainability. All future development will happen in the new repository.
+
+---
+
 ## Fork Improvements
 
 This fork extends the [original MCP Agent Mail](https://github.com/Dicklesworthstone/mcp_agent_mail) with several production-ready enhancements:
