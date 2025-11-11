@@ -43,6 +43,7 @@ CONFIG_FILE = CONFIG_DIR / "wizard-config.json"
 def find_available_port(start: int = 9000, end: int = 9100) -> int:
     """Find an available port in the given range (inclusive)."""
     import socket
+
     for port in range(start, end + 1):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -84,6 +85,7 @@ def save_config(config: dict[str, Any]) -> None:
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         import json
+
         with CONFIG_FILE.open("w") as f:
             json.dump(config, f, indent=2)
     except Exception as e:
@@ -96,6 +98,7 @@ def load_last_config() -> dict[str, Any] | None:
         return None
     try:
         import json
+
         with CONFIG_FILE.open("r") as f:
             return json.load(f)
     except Exception:
@@ -225,8 +228,12 @@ def install_gh_cli() -> bool:
     # For apt/dnf, show manual instructions (requires adding repo first)
     if pkg_mgr == "apt":
         console.print("\n[cyan]To install gh CLI on Ubuntu/Debian:[/]")
-        console.print("  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg")
-        console.print('  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null')
+        console.print(
+            "  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg"
+        )
+        console.print(
+            '  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null'
+        )
         console.print("  sudo apt update")
         console.print("  sudo apt install gh -y")
     elif pkg_mgr == "dnf":
@@ -371,8 +378,8 @@ def check_prerequisites(require_github: bool = False, require_cloudflare: bool =
             console.print("[green]✓ git configured[/]")
         except (FileNotFoundError, subprocess.CalledProcessError):
             console.print("[red]❌ git not configured[/]")
-            console.print("[cyan]Run:[/] git config --global user.name \"Your Name\"")
-            console.print("[cyan]Run:[/] git config --global user.email \"you@example.com\"")
+            console.print('[cyan]Run:[/] git config --global user.name "Your Name"')
+            console.print('[cyan]Run:[/] git config --global user.email "you@example.com"')
             all_satisfied = False
 
     if not all_satisfied:
@@ -392,6 +399,7 @@ def get_projects() -> list[dict[str, str]]:
         )
         # Parse JSON output
         import json
+
         projects_data = json.loads(result.stdout)
         return [{"slug": p["slug"], "human_key": p["human_key"]} for p in projects_data]
     except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, TypeError):
@@ -518,12 +526,14 @@ def export_bundle(
     signing_pub_path = None
     if signing_key:
         signing_pub_path = signing_key.with_suffix(".pub")
-        cmd.extend([
-            "--signing-key",
-            str(signing_key),
-            "--signing-public-out",
-            str(signing_pub_path),
-        ])
+        cmd.extend(
+            [
+                "--signing-key",
+                str(signing_key),
+                "--signing-public-out",
+                str(signing_pub_path),
+            ]
+        )
 
     console.print("\n[bold]Exporting mailbox bundle...[/]")
     with Progress(
@@ -777,8 +787,10 @@ def deploy_to_cloudflare_pages(output_dir: Path, project_name: str) -> tuple[boo
                 "pages",
                 "deploy",
                 str(output_dir),
-                "--project-name", project_name,
-                "--branch", "main",
+                "--project-name",
+                project_name,
+                "--branch",
+                "main",
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -969,15 +981,17 @@ def main() -> None:
                 console.print(f"[green]✓ Signing public key: {signing_pub}[/]")
 
             # Save config for next run
-            save_config({
-                "project_indices": selected_indices,
-                "project_count": len(selected_projects),
-                "scrub_preset": scrub_preset,
-                "deployment": deployment,
-                "deployment_type": "local",
-                "use_signing": use_signing,
-                "generate_new_key": generate_new_key,
-            })
+            save_config(
+                {
+                    "project_indices": selected_indices,
+                    "project_count": len(selected_projects),
+                    "scrub_preset": scrub_preset,
+                    "deployment": deployment,
+                    "deployment_type": "local",
+                    "use_signing": use_signing,
+                    "generate_new_key": generate_new_key,
+                }
+            )
 
         elif deployment.get("type") == "github-new":
             # Create repo
@@ -1012,15 +1026,17 @@ def main() -> None:
                     console.print("[dim]Share this with viewers to verify bundle authenticity[/]")
 
                 # Save config for next run
-                save_config({
-                    "project_indices": selected_indices,
-                    "project_count": len(selected_projects),
-                    "scrub_preset": scrub_preset,
-                    "deployment": deployment,
-                    "deployment_type": "github-new",
-                    "use_signing": use_signing,
-                    "generate_new_key": generate_new_key,
-                })
+                save_config(
+                    {
+                        "project_indices": selected_indices,
+                        "project_count": len(selected_projects),
+                        "scrub_preset": scrub_preset,
+                        "deployment": deployment,
+                        "deployment_type": "github-new",
+                        "use_signing": use_signing,
+                        "generate_new_key": generate_new_key,
+                    }
+                )
             else:
                 console.print("\n[yellow]Repository created but Pages setup failed[/]")
                 console.print(f"Visit https://github.com/{repo_full_name}/settings/pages to enable manually")
@@ -1044,15 +1060,17 @@ def main() -> None:
                     console.print("[dim]Share this with viewers to verify bundle authenticity[/]")
 
                 # Save config for next run
-                save_config({
-                    "project_indices": selected_indices,
-                    "project_count": len(selected_projects),
-                    "scrub_preset": scrub_preset,
-                    "deployment": deployment,
-                    "deployment_type": "cloudflare-pages",
-                    "use_signing": use_signing,
-                    "generate_new_key": generate_new_key,
-                })
+                save_config(
+                    {
+                        "project_indices": selected_indices,
+                        "project_count": len(selected_projects),
+                        "scrub_preset": scrub_preset,
+                        "deployment": deployment,
+                        "deployment_type": "cloudflare-pages",
+                        "use_signing": use_signing,
+                        "generate_new_key": generate_new_key,
+                    }
+                )
             else:
                 console.print("\n[yellow]Cloudflare Pages deployment failed[/]")
                 sys.exit(1)

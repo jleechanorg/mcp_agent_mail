@@ -98,9 +98,7 @@ async def _get_agent_record(project: Project, agent_name: str) -> Agent:
         raise ValueError("Project must have an id before querying agents")
     await ensure_schema()
     async with get_session() as session:
-        result = await session.execute(
-            select(Agent).where(Agent.project_id == project.id, Agent.name == agent_name)
-        )
+        result = await session.execute(select(Agent).where(Agent.project_id == project.id, Agent.name == agent_name))
         agent = result.scalars().first()
         if not agent:
             raise ValueError(f"Agent '{agent_name}' not registered for project '{project.human_key}'")
@@ -127,6 +125,7 @@ def serve_http(
 
     # Display awesome startup banner with database stats
     from . import rich_logger
+
     rich_logger.display_startup_banner(settings, resolved_host, resolved_port, resolved_path)
 
     server = build_mcp_server()
@@ -134,6 +133,7 @@ def serve_http(
     # Disable WebSockets: HTTP-only MCP transport. Stay compatible with tests that
     # monkeypatch uvicorn.run without the 'ws' parameter.
     import inspect as _inspect
+
     _sig = _inspect.signature(uvicorn.run)
     _kwargs: dict[str, Any] = {"host": resolved_host, "port": resolved_port, "log_level": "info"}
     if "ws" in _sig.parameters:
@@ -175,7 +175,9 @@ def share_export(
             help="Launch an interactive wizard (future enhancement; currently prints guidance).",
         ),
     ] = False,
-    projects: Annotated[list[str] | None, typer.Option("--project", "-p", help="Limit export to specific project slugs or human keys.")] = None,
+    projects: Annotated[
+        list[str] | None, typer.Option("--project", "-p", help="Limit export to specific project slugs or human keys.")
+    ] = None,
     inline_threshold: Annotated[
         int,
         typer.Option(
@@ -237,8 +239,12 @@ def share_export(
             show_default=True,
         ),
     ] = True,
-    signing_key: Annotated[Optional[Path], typer.Option("--signing-key", help="Path to Ed25519 signing key (32-byte seed).")]=None,
-    signing_public_out: Annotated[Optional[Path], typer.Option("--signing-public-out", help="Write public key to this file after signing.")]=None,
+    signing_key: Annotated[
+        Optional[Path], typer.Option("--signing-key", help="Path to Ed25519 signing key (32-byte seed).")
+    ] = None,
+    signing_public_out: Annotated[
+        Optional[Path], typer.Option("--signing-public-out", help="Write public key to this file after signing.")
+    ] = None,
     age_recipients: Annotated[
         Optional[list[str]],
         typer.Option(
@@ -254,10 +260,7 @@ def share_export(
         projects = []
     scrub_preset = (scrub_preset or "standard").strip().lower()
     if scrub_preset not in SCRUB_PRESETS:
-        console.print(
-            "[red]Invalid scrub preset:[/] "
-            f"{scrub_preset}. Choose one of: {', '.join(SCRUB_PRESETS)}."
-        )
+        console.print("[red]Invalid scrub preset:[/] " f"{scrub_preset}. Choose one of: {', '.join(SCRUB_PRESETS)}.")
         raise typer.Exit(code=1)
     raw_output = _resolve_path(output)
     temp_dir: Optional[tempfile.TemporaryDirectory[str]] = None
@@ -314,9 +317,7 @@ def share_export(
         raise typer.Exit(code=1) from exc
 
     if detach_threshold <= inline_threshold:
-        console.print(
-            "[yellow]Adjusting detach threshold to exceed inline threshold to avoid conflicts.[/]"
-        )
+        console.print("[yellow]Adjusting detach threshold to exceed inline threshold to avoid conflicts.[/]")
         detach_threshold = inline_threshold + max(1024, inline_threshold // 2 or 1)
 
     hosting_hints = detect_hosting_hints(output_path)
@@ -470,9 +471,7 @@ def share_export(
                 output_path,
                 public_out=public_out_path,
             )
-            console.print(
-                f"[green]✓ Signed manifest (Ed25519, public key {signature_info['public_key']})[/]"
-            )
+            console.print(f"[green]✓ Signed manifest (Ed25519, public key {signature_info['public_key']})[/]")
         except ShareExportError as exc:
             console.print(f"[red]Manifest signing failed:[/] {exc}")
             if temp_dir is not None:
@@ -618,9 +617,7 @@ def _run_share_export_wizard(
     )
     preset_value = (preset_input or default_scrub_preset).strip().lower()
     if preset_value not in SCRUB_PRESETS:
-        console.print(
-            f"[yellow]Unknown preset '{preset_value}'. Using {default_scrub_preset} instead.[/]"
-        )
+        console.print(f"[yellow]Unknown preset '{preset_value}'. Using {default_scrub_preset} instead.[/]")
         preset_value = default_scrub_preset
 
     zip_bundle = typer.confirm("Package the output directory as a .zip archive?", default=True)
@@ -1022,6 +1019,7 @@ def list_projects(
                 entry["agent_count"] = agent_count
             projects_json.append(entry)
         import sys
+
         json.dump(projects_json, sys.stdout, indent=2)
         sys.stdout.write("\n")
     else:
@@ -1091,8 +1089,10 @@ def file_reservations_list(
             raise ValueError("Project must have an id")
         await ensure_schema()
         async with get_session() as session:
-            stmt = select(FileReservation, Agent.name).join(Agent, FileReservation.agent_id == Agent.id).where(
-                FileReservation.project_id == project_record.id
+            stmt = (
+                select(FileReservation, Agent.name)
+                .join(Agent, FileReservation.agent_id == Agent.id)
+                .where(FileReservation.project_id == project_record.id)
             )
             if active_only:
                 stmt = stmt.where(cast(Any, FileReservation.released_ts).is_(None))
@@ -1140,7 +1140,9 @@ def file_reservations_active(
             stmt = (
                 select(FileReservation, Agent.name)
                 .join(Agent, FileReservation.agent_id == Agent.id)
-                .where(FileReservation.project_id == project_record.id, cast(Any, FileReservation.released_ts).is_(None))
+                .where(
+                    FileReservation.project_id == project_record.id, cast(Any, FileReservation.released_ts).is_(None)
+                )
                 .order_by(asc(FileReservation.expires_ts))
                 .limit(limit)
             )
@@ -1245,6 +1247,7 @@ def file_reservations_soon(
         )
     console.print(table)
 
+
 @acks_app.command("pending")
 def acks_pending(
     project: str = typer.Argument(..., help="Project slug or human key"),
@@ -1290,6 +1293,7 @@ def acks_pending(
     table.add_column("Ack Age")
 
     now = datetime.now(timezone.utc)
+
     def _age(dt: datetime) -> str:
         # Coerce naive datetimes from SQLite to UTC for arithmetic
         if dt.tzinfo is None:
@@ -1352,8 +1356,10 @@ def acks_remind(
 
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(minutes=min_age_minutes)
+
     def _aware(dt: datetime) -> datetime:
         return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
     stale = [(m, rts, ats, k) for (m, rts, ats, k) in rows if _aware(m.created_ts) <= cutoff]
 
     table = Table(title=f"ACK Reminders (>{min_age_minutes}m) for {agent_record.name}")
@@ -1434,6 +1440,7 @@ def acks_overdue(
     table.add_column("Kind")
 
     now = datetime.now(timezone.utc)
+
     def _age(dt: datetime) -> str:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
@@ -1457,9 +1464,6 @@ def acks_overdue(
         console.print(table)
 
 
-
-
-
 @app.command("list-acks")
 def list_acks(
     project_key: str = typer.Option(..., "--project", help="Project human key or slug."),
@@ -1472,7 +1476,9 @@ def list_acks(
         await ensure_schema()
         async with get_session() as session:
             # Resolve project and agent
-            proj_result = await session.execute(select(Project).where((Project.slug == slugify(project_key)) | (Project.human_key == project_key)))
+            proj_result = await session.execute(
+                select(Project).where((Project.slug == slugify(project_key)) | (Project.human_key == project_key))
+            )
             project = proj_result.scalars().first()
             if not project:
                 raise typer.BadParameter(f"Project not found for key: {project_key}")
@@ -1549,9 +1555,7 @@ def config_set_port(
             action = "Created"
 
         # Write to temporary file in same directory (for atomic move)
-        temp_fd, temp_path = tempfile.mkstemp(
-            dir=env_path.parent, prefix=".env.tmp.", text=True
-        )
+        temp_fd, temp_path = tempfile.mkstemp(dir=env_path.parent, prefix=".env.tmp.", text=True)
         try:
             # Write content with secure permissions from the start
             # (best-effort on Windows where Unix permissions don't apply)
