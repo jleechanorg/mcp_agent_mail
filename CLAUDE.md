@@ -42,6 +42,21 @@ This script:
 
 With the server running, Claude agents can call `ensure_project`, `register_agent`, `fetch_inbox`, and the other MCP tools without additional setup.
 
+## Slash Commands
+
+This repository uses a git submodule for shared slash commands. When looking for available slash commands:
+
+- Check the **`claude-commands/.claude/commands/`** folder (git submodule)
+- This submodule contains shared commands that are used across multiple projects
+- The submodule path is `claude-commands/` which contains the `.claude/commands/` directory structure
+- Always check this location in addition to any local `.claude/commands/` folder
+
+If slash commands are not working or the submodule is empty, ensure it's properly initialized:
+
+```bash
+git submodule update --init --recursive
+```
+
 ## PR Responsibility Model
 
 When working on pull requests, understand that **PRs own all regressions versus `origin/main`**, regardless of which commit in the PR introduced them.
